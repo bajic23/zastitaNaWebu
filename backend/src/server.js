@@ -7,39 +7,16 @@ const helmet = require("helmet");
 const authRoutes = require("./routes/auth");
 
 const app = express();
-
-/* =========================
-   GLOBAL MIDDLEWARE
-========================= */
-
-// Security headers
 app.use(helmet());
-
-// Enable CORS (frontend će biti na portu 3000)
 app.use(cors({
   origin: "http://localhost:3000",
   credentials: true
 }));
-
-// Parse JSON
 app.use(express.json());
-
-/* =========================
-   ROUTES
-========================= */
-
-// Health check
 app.get("/", (req, res) => {
   res.json({ message: "Backend radi 🚀" });
 });
-
-// Auth routes
 app.use("/api/auth", authRoutes);
-
-/* =========================
-   START SERVER
-========================= */
-
 async function start() {
   try {
     await mongoose.connect(process.env.MONGO_URI);

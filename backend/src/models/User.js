@@ -18,8 +18,6 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       trim: true
     },
-
-    // Ovde čuvaš bcrypt hash, NE plaintext lozinku
     passwordHash: {
       type: String,
       required: true
@@ -31,18 +29,15 @@ const userSchema = new mongoose.Schema(
       default: "USER"
     },
 
-    // Aktivnost
+
     lastLoginAt: { type: Date },
     loginHistory: { type: [loginEntrySchema], default: [] },
 
-    // Za brute force / blacklist logiku (korisno za projekat)
     failedLoginCount: { type: Number, default: 0 },
     blockedUntil: { type: Date, default: null },
 
-    // Refresh token (ako radiš refresh token sistem)
     refreshTokenHash: { type: String, default: null },
-
-    // Email verifikacija (ako radiš potvrdu email-a)
+    
     emailVerified: { type: Boolean, default: false },
     emailVerifyToken: { type: String, default: null },
     emailVerifyTokenExpiresAt: { type: Date, default: null }

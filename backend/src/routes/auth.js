@@ -5,12 +5,12 @@ const crypto = require("crypto");
 const User = require("../models/User");
 
 const router = express.Router();
+const requireAuth = require("../middlewares/requireAuth");
 
 function isStrongPassword(pw) {
-  // Minimum 8, bar 1 veliko slovo, 1 malo, 1 broj, 1 specijalni znak
   return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{10,}$/.test(pw);
 }
-    //REGISTER
+  //REGISTER
 router.post("/register", async (req, res) => {
   try {
     const { email, password } = req.body ?? {};
@@ -34,11 +34,8 @@ router.post("/register", async (req, res) => {
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
-
-    // (Opcionalno) email verifikacija token - imaš polja u User modelu
     const emailVerifyToken = crypto.randomBytes(32).toString("hex");
-    const emailVerifyTokenExpiresAt = new Date(Date.now() + 1000 * 60 * 30); // 30 min
-
+    const emailVerifyTokenExpiresAt = new Date(Date.now() + 1000 * 60 * 30);
     const user = await User.create({
       email: normalizedEmail,
       passwordHash,
@@ -47,8 +44,6 @@ router.post("/register", async (req, res) => {
       emailVerifyToken,
       emailVerifyTokenExpiresAt
     });
-
-    // JWT (access token) - obavezno postavi JWT_SECRET u .env
     const token = jwt.sign(
       { sub: user._id.toString(), role: user.role },
       process.env.JWT_SECRET,
@@ -64,7 +59,6 @@ router.post("/register", async (req, res) => {
         role: user.role,
         emailVerified: user.emailVerified
       }
-      // emailVerifyToken: emailVerifyToken  // <- nemoj ovo u produkciji; za demo može ako želiš
     });
   } catch (err) {
     console.error(err);
@@ -88,7 +82,6 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ message: "Neispravni podaci." });
     }
 
-    // 🔒 Provera da li je nalog blokiran
     if (user.blockedUntil && user.blockedUntil > new Date()) {
       return res.status(403).json({
         message: "Nalog je privremeno blokiran zbog previše neuspešnih pokušaja."
@@ -99,8 +92,6 @@ router.post("/login", async (req, res) => {
 
     if (!isMatch) {
       user.failedLoginCount += 1;
-
-      // Ako ima 5 neuspešnih pokušaja → blokiraj 15 minuta
       if (user.failedLoginCount >= 5) {
         user.blockedUntil = new Date(Date.now() + 15 * 60 * 1000);
         user.failedLoginCount = 0;
@@ -110,8 +101,6 @@ router.post("/login", async (req, res) => {
 
       return res.status(401).json({ message: "Neispravni podaci." });
     }
-
-    // ✅ Uspešan login
 
     user.failedLoginCount = 0;
     user.blockedUntil = null;
@@ -143,6 +132,30 @@ router.post("/login", async (req, res) => {
 
   } catch (error) {
     console.error(error);
+    return res.status(500).json({ message: "Greška na serveru." });
+  }
+});
+  //ME
+  router.get("/me", requireAuth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select(
+      "email role emailVerified lastLoginAt loginHistory createdAt updatedAt"
+    );
+
+    if (!user) return res.status(404).json({ message: "Korisnik nije pronađen." });
+
+    return res.json({
+      user: {
+        id: user._id,
+        email: user.email,
+        role: user.role,
+        emailVerified: user.emailVerified,
+        lastLoginAt: user.lastLoginAt,
+        loginHistory: user.loginHistory
+      }
+    });
+  } catch (e) {
+    console.error(e);
     return res.status(500).json({ message: "Greška na serveru." });
   }
 });
