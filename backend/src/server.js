@@ -5,18 +5,26 @@ const cors = require("cors");
 const helmet = require("helmet");
 
 const authRoutes = require("./routes/auth");
+const adminRoutes = require("./routes/admin");
 
 const app = express();
+
 app.use(helmet());
+
 app.use(cors({
   origin: "http://localhost:3000",
   credentials: true
 }));
+
 app.use(express.json());
+
 app.get("/", (req, res) => {
-  res.json({ message: "Backend radi 🚀" });
+  res.json({ message: "Backend radi" });
 });
+
 app.use("/api/auth", authRoutes);
+app.use("/api/admin", adminRoutes);
+
 async function start() {
   try {
     await mongoose.connect(process.env.MONGO_URI);
