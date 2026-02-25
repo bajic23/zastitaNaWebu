@@ -17,7 +17,7 @@ const loginLimiter = rateLimit({
   max: 20,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { message: "Previše pokušaja logovanja. Pokušaj ponovo kasnije." }
+  message: { message: "Previše pokušaja logovanja. Pokušaj ponovo kasnije." },
 });
 
 // REGISTER
@@ -34,13 +34,15 @@ router.post("/register", async (req, res) => {
     if (!isStrongPassword(password)) {
       return res.status(400).json({
         message:
-          "Lozinka mora imati minimum 10 karaktera i bar: 1 veliko slovo, 1 malo slovo, 1 broj i 1 specijalni znak."
+          "Lozinka mora imati minimum 10 karaktera i bar: 1 veliko slovo, 1 malo slovo, 1 broj i 1 specijalni znak.",
       });
     }
 
     const existing = await User.findOne({ email: normalizedEmail });
     if (existing) {
-      return res.status(409).json({ message: "Korisnik sa ovim email-om već postoji." });
+      return res
+        .status(409)
+        .json({ message: "Korisnik sa ovim email-om već postoji." });
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
@@ -53,13 +55,13 @@ router.post("/register", async (req, res) => {
       role: "USER",
       emailVerified: false,
       emailVerifyToken,
-      emailVerifyTokenExpiresAt
+      emailVerifyTokenExpiresAt,
     });
 
     const token = jwt.sign(
       { sub: user._id.toString(), role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: "15m" }
+      { expiresIn: "15m" },
     );
 
     return res.status(201).json({
@@ -69,8 +71,8 @@ router.post("/register", async (req, res) => {
         id: user._id,
         email: user.email,
         role: user.role,
-        emailVerified: user.emailVerified
-      }
+        emailVerified: user.emailVerified,
+      },
     });
   } catch (err) {
     console.error(err);
@@ -94,9 +96,17 @@ router.post("/login", loginLimiter, async (req, res) => {
       return res.status(401).json({ message: "Neispravni podaci." });
     }
 
+    if (!user.emailVerified) {
+      return res.status(403).json({
+        message:
+          "Email nije verifikovan. Proveri inbox i potvrdi email pre logovanja.",
+      });
+    }
+
     if (user.blockedUntil && user.blockedUntil > new Date()) {
       return res.status(403).json({
-        message: "Nalog je privremeno blokiran zbog previše neuspešnih pokušaja."
+        message:
+          "Nalog je privremeno blokiran zbog previše neuspešnih pokušaja.",
       });
     }
 
@@ -120,7 +130,7 @@ router.post("/login", loginLimiter, async (req, res) => {
     user.loginHistory.push({
       at: new Date(),
       ip: req.ip,
-      userAgent: req.headers["user-agent"]
+      userAgent: req.headers["user-agent"],
     });
 
     await user.save();
@@ -128,13 +138,13 @@ router.post("/login", loginLimiter, async (req, res) => {
     const token = jwt.sign(
       { sub: user._id.toString(), role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: "15m" }
+      { expiresIn: "15m" },
     );
 
     return res.json({
       message: "Uspešno logovanje.",
       token,
-      user: { id: user._id, email: user.email, role: user.role }
+      user: { id: user._id, email: user.email, role: user.role },
     });
   } catch (error) {
     console.error(error);
@@ -146,10 +156,11 @@ router.post("/login", loginLimiter, async (req, res) => {
 router.get("/me", requireAuth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select(
-      "email role emailVerified lastLoginAt loginHistory createdAt updatedAt"
+      "email role emailVerified lastLoginAt loginHistory createdAt updatedAt",
     );
 
-    if (!user) return res.status(404).json({ message: "Korisnik nije pronađen." });
+    if (!user)
+      return res.status(404).json({ message: "Korisnik nije pronađen." });
 
     return res.json({
       user: {
@@ -158,15 +169,15 @@ router.get("/me", requireAuth, async (req, res) => {
         role: user.role,
         emailVerified: user.emailVerified,
         lastLoginAt: user.lastLoginAt,
-        loginHistory: user.loginHistory
-      }
+        loginHistory: user.loginHistory,
+      },
     });
   } catch (e) {
     console.error(e);
     return res.status(500).json({ message: "Greška na serveru." });
   }
 });
-  //VERIFY EMAIL
+//VERIFY EMAIL
 router.get("/verify-email", async (req, res) => {
   try {
     const token = String(req.query.token || "");
@@ -174,11 +185,13 @@ router.get("/verify-email", async (req, res) => {
 
     const user = await User.findOne({
       emailVerifyToken: token,
-      emailVerifyTokenExpiresAt: { $gt: new Date() }
+      emailVerifyTokenExpiresAt: { $gt: new Date() },
     });
 
     if (!user) {
-      return res.status(400).json({ message: "Token je nevažeći ili je istekao." });
+      return res
+        .status(400)
+        .json({ message: "Token je nevažeći ili je istekao." });
     }
 
     user.emailVerified = true;
