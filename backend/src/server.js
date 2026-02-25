@@ -11,12 +11,16 @@ const app = express();
 
 app.use(helmet());
 
-app.use(cors({
-  origin: "http://localhost:3000",
-  credentials: true
-}));
+app.use(
+  cors({
+    origin: "http://localhost:3000",
+    credentials: true,
+  }),
+);
 
 app.use(express.json());
+const logAccess = require("./middlewares/logAccess");
+app.use("/api", logAccess);
 
 app.get("/", (req, res) => {
   res.json({ message: "Backend radi" });
@@ -34,7 +38,6 @@ async function start() {
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
     });
-
   } catch (error) {
     console.error("MongoDB connection error:", error.message);
     process.exit(1);
