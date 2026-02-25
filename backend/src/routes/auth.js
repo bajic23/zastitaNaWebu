@@ -161,6 +161,32 @@ router.post("/login", loginLimiter, async (req, res) => {
   }
 });
 
+//LOGOUT
+router.post("/logout", async (req, res) => {
+  try {
+    const { refreshToken } = req.body ?? {};
+
+    if (!refreshToken) {
+      return res.status(400).json({ message: "Nedostaje refreshToken." });
+    }
+
+    const refreshHash = hashToken(refreshToken);
+
+    const user = await User.findOne({ refreshTokenHash: refreshHash });
+    if (!user) {
+      return res.status(204).send();
+    }
+
+    user.refreshTokenHash = undefined;
+    await user.save();
+
+    return res.status(204).send();
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ message: "Greška pri logout-u." });
+  }
+});
+
 // REFRESH
 router.post("/refresh", async (req, res) => {
   try {
@@ -178,8 +204,14 @@ router.post("/refresh", async (req, res) => {
     }
 
     if (user.blockedUntil && user.blockedUntil > new Date()) {
-      return res.status(403).json({ message: "Nalog je privremeno blokiran." });
+      return res.status(403).json({ message: "Nalog je blokiran." });
     }
+
+    //TOKEN ROTATION
+    const newRefreshToken = generateRefreshToken();
+    user.refreshTokenHash = hashToken(newRefreshToken);
+
+    await user.save();
 
     const accessToken = jwt.sign(
       { sub: user._id.toString(), role: user.role },
@@ -187,7 +219,10 @@ router.post("/refresh", async (req, res) => {
       { expiresIn: process.env.JWT_EXPIRES_IN || "15m" },
     );
 
-    return res.json({ accessToken });
+    return res.json({
+      accessToken,
+      refreshToken: newRefreshToken,
+    });
   } catch (e) {
     console.error(e);
     return res.status(500).json({ message: "Greška pri osvežavanju tokena." });
