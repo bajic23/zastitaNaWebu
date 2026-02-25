@@ -20,6 +20,11 @@ const loginLimiter = rateLimit({
   message: { message: "Previše pokušaja logovanja. Pokušaj ponovo kasnije." },
 });
 
+const generateRefreshToken = () => crypto.randomBytes(64).toString("hex");
+
+const hashToken = (token) =>
+  crypto.createHash("sha256").update(token).digest("hex");
+
 // REGISTER
 router.post("/register", async (req, res) => {
   try {
@@ -133,22 +138,59 @@ router.post("/login", loginLimiter, async (req, res) => {
       userAgent: req.headers["user-agent"],
     });
 
+    const refreshToken = generateRefreshToken();
+    user.refreshTokenHash = hashToken(refreshToken);
+
     await user.save();
 
     const token = jwt.sign(
       { sub: user._id.toString(), role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: "15m" },
+      { expiresIn: process.env.JWT_EXPIRES_IN || "15m" },
     );
 
     return res.json({
       message: "Uspešno logovanje.",
       token,
+      refreshToken,
       user: { id: user._id, email: user.email, role: user.role },
     });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: "Greška na serveru." });
+  }
+});
+
+// REFRESH
+router.post("/refresh", async (req, res) => {
+  try {
+    const { refreshToken } = req.body ?? {};
+
+    if (!refreshToken) {
+      return res.status(400).json({ message: "Nedostaje refreshToken." });
+    }
+
+    const refreshHash = hashToken(refreshToken);
+
+    const user = await User.findOne({ refreshTokenHash: refreshHash });
+    if (!user) {
+      return res.status(401).json({ message: "Nevažeći refresh token." });
+    }
+
+    if (user.blockedUntil && user.blockedUntil > new Date()) {
+      return res.status(403).json({ message: "Nalog je privremeno blokiran." });
+    }
+
+    const accessToken = jwt.sign(
+      { sub: user._id.toString(), role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES_IN || "15m" },
+    );
+
+    return res.json({ accessToken });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ message: "Greška pri osvežavanju tokena." });
   }
 });
 
@@ -159,8 +201,9 @@ router.get("/me", requireAuth, async (req, res) => {
       "email role emailVerified lastLoginAt loginHistory createdAt updatedAt",
     );
 
-    if (!user)
+    if (!user) {
       return res.status(404).json({ message: "Korisnik nije pronađen." });
+    }
 
     return res.json({
       user: {
@@ -177,7 +220,8 @@ router.get("/me", requireAuth, async (req, res) => {
     return res.status(500).json({ message: "Greška na serveru." });
   }
 });
-//VERIFY EMAIL
+
+// VERIFY EMAIL
 router.get("/verify-email", async (req, res) => {
   try {
     const token = String(req.query.token || "");
@@ -206,4 +250,5 @@ router.get("/verify-email", async (req, res) => {
     return res.status(500).json({ message: "Greška na serveru." });
   }
 });
+
 module.exports = router;
