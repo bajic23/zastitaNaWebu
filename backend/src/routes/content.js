@@ -1,5 +1,5 @@
-import express from "express";
-import requireAuth from "../middlewares/requireAuth.js";
+const express = require("express");
+const requireAuth = require("../middlewares/requireAuth");
 
 const router = express.Router();
 
@@ -8,20 +8,20 @@ const contentData = [
     id: "1",
     title: "Prvi članak",
     text: "Ovo je prvi zaštićeni sadržaj.",
-    roles: ["USER", "ADMIN"],
+    roles: ["USER", "ADMIN"]
   },
   {
     id: "2",
     title: "Drugi članak",
     text: "Ovo je drugi sadržaj za korisnike.",
-    roles: ["USER", "ADMIN"],
+    roles: ["USER", "ADMIN"]
   },
   {
     id: "3",
     title: "Admin dokument",
     text: "Ovo može videti samo admin.",
-    roles: ["ADMIN"],
-  },
+    roles: ["ADMIN"]
+  }
 ];
 
 router.get("/:id", requireAuth, (req, res) => {
@@ -34,10 +34,12 @@ router.get("/:id", requireAuth, (req, res) => {
   const userRole = req.user?.role;
 
   if (!content.roles.includes(userRole)) {
-    return res.status(403).json({ message: "Nemate pravo pristupa ovom sadržaju." });
+    return res
+      .status(403)
+      .json({ message: "Nemate pravo pristupa ovom sadržaju." });
   }
 
-  res.json(content);
+  return res.json(content);
 });
 
-export default router;
+module.exports = router;

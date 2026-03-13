@@ -69,6 +69,15 @@ export default function LoginPage() {
           {loading ? "..." : "Uloguj se"}
         </button>
       </form>
+      <button
+        type="button"
+        onClick={() => {
+          window.location.href = "http://localhost:5000/api/auth/google";
+        }}
+        className="w-full rounded-lg border border-gray-300 px-4 py-2 font-medium hover:bg-gray-50"
+      >
+        Prijava preko Google-a
+      </button>
 
       {msg ? <p style={{ marginTop: 12 }}>{msg}</p> : null}
     </div>

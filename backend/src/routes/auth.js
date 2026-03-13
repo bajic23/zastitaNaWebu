@@ -3,6 +3,8 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const rateLimit = require("express-rate-limit");
+const passport = require("passport");
+
 const User = require("../models/User");
 const requireAuth = require("../middlewares/requireAuth");
 
@@ -17,7 +19,7 @@ const loginLimiter = rateLimit({
   max: 20,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { message: "Previše pokušaja logovanja. Pokušaj ponovo kasnije." },
+  message: { message: "Previše pokušaja logovanja. Pokušaj ponovo kasnije." }
 });
 
 const generateRefreshToken = () => crypto.randomBytes(64).toString("hex");
@@ -39,7 +41,7 @@ router.post("/register", async (req, res) => {
     if (!isStrongPassword(password)) {
       return res.status(400).json({
         message:
-          "Lozinka mora imati minimum 10 karaktera i bar: 1 veliko slovo, 1 malo slovo, 1 broj i 1 specijalni znak.",
+          "Lozinka mora imati minimum 10 karaktera i bar: 1 veliko slovo, 1 malo slovo, 1 broj i 1 specijalni znak."
       });
     }
 
@@ -60,13 +62,13 @@ router.post("/register", async (req, res) => {
       role: "USER",
       emailVerified: false,
       emailVerifyToken,
-      emailVerifyTokenExpiresAt,
+      emailVerifyTokenExpiresAt
     });
 
     const token = jwt.sign(
       { sub: user._id.toString(), role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: "15m" },
+      { expiresIn: "15m" }
     );
 
     return res.status(201).json({
@@ -76,8 +78,8 @@ router.post("/register", async (req, res) => {
         id: user._id,
         email: user.email,
         role: user.role,
-        emailVerified: user.emailVerified,
-      },
+        emailVerified: user.emailVerified
+      }
     });
   } catch (err) {
     console.error(err);
@@ -104,14 +106,20 @@ router.post("/login", loginLimiter, async (req, res) => {
     if (!user.emailVerified) {
       return res.status(403).json({
         message:
-          "Email nije verifikovan. Proveri inbox i potvrdi email pre logovanja.",
+          "Email nije verifikovan. Proveri inbox i potvrdi email pre logovanja."
       });
     }
 
     if (user.blockedUntil && user.blockedUntil > new Date()) {
       return res.status(403).json({
         message:
-          "Nalog je privremeno blokiran zbog previše neuspešnih pokušaja.",
+          "Nalog je privremeno blokiran zbog previše neuspešnih pokušaja."
+      });
+    }
+
+    if (!user.passwordHash) {
+      return res.status(400).json({
+        message: "Ovaj nalog koristi Google prijavu. Uloguj se preko Google-a."
       });
     }
 
@@ -135,7 +143,7 @@ router.post("/login", loginLimiter, async (req, res) => {
     user.loginHistory.push({
       at: new Date(),
       ip: req.ip,
-      userAgent: req.headers["user-agent"],
+      userAgent: req.headers["user-agent"]
     });
 
     const refreshToken = generateRefreshToken();
@@ -146,14 +154,14 @@ router.post("/login", loginLimiter, async (req, res) => {
     const token = jwt.sign(
       { sub: user._id.toString(), role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || "15m" },
+      { expiresIn: process.env.JWT_EXPIRES_IN || "15m" }
     );
 
     return res.json({
       message: "Uspešno logovanje.",
       token,
       refreshToken,
-      user: { id: user._id, email: user.email, role: user.role },
+      user: { id: user._id, email: user.email, role: user.role }
     });
   } catch (error) {
     console.error(error);
@@ -161,7 +169,52 @@ router.post("/login", loginLimiter, async (req, res) => {
   }
 });
 
-//LOGOUT
+// GOOGLE LOGIN
+router.get(
+  "/google",
+  passport.authenticate("google", { scope: ["profile", "email"] })
+);
+
+router.get(
+  "/google/callback",
+  passport.authenticate("google", {
+    session: false,
+    failureRedirect: "http://localhost:3000/login?error=google_login_failed"
+  }),
+  async (req, res) => {
+    try {
+      req.user.failedLoginCount = 0;
+      req.user.blockedUntil = null;
+      req.user.lastLoginAt = new Date();
+
+      req.user.loginHistory.push({
+        at: new Date(),
+        ip: req.ip,
+        userAgent: req.headers["user-agent"]
+      });
+
+      const refreshToken = generateRefreshToken();
+      req.user.refreshTokenHash = hashToken(refreshToken);
+
+      await req.user.save();
+
+      const token = jwt.sign(
+        { sub: req.user._id.toString(), role: req.user.role },
+        process.env.JWT_SECRET,
+        { expiresIn: process.env.JWT_EXPIRES_IN || "15m" }
+      );
+
+      return res.redirect(
+        `http://localhost:3000/login/success?token=${encodeURIComponent(token)}&refreshToken=${encodeURIComponent(refreshToken)}`
+      );
+    } catch (error) {
+      console.error(error);
+      return res.redirect("http://localhost:3000/login?error=google_login_failed");
+    }
+  }
+);
+
+// LOGOUT
 router.post("/logout", async (req, res) => {
   try {
     const { refreshToken } = req.body ?? {};
@@ -177,7 +230,7 @@ router.post("/logout", async (req, res) => {
       return res.status(204).send();
     }
 
-    user.refreshTokenHash = undefined;
+    user.refreshTokenHash = null;
     await user.save();
 
     return res.status(204).send();
@@ -207,7 +260,6 @@ router.post("/refresh", async (req, res) => {
       return res.status(403).json({ message: "Nalog je blokiran." });
     }
 
-    //TOKEN ROTATION
     const newRefreshToken = generateRefreshToken();
     user.refreshTokenHash = hashToken(newRefreshToken);
 
@@ -216,12 +268,12 @@ router.post("/refresh", async (req, res) => {
     const accessToken = jwt.sign(
       { sub: user._id.toString(), role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || "15m" },
+      { expiresIn: process.env.JWT_EXPIRES_IN || "15m" }
     );
 
     return res.json({
       accessToken,
-      refreshToken: newRefreshToken,
+      refreshToken: newRefreshToken
     });
   } catch (e) {
     console.error(e);
@@ -233,7 +285,7 @@ router.post("/refresh", async (req, res) => {
 router.get("/me", requireAuth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select(
-      "email role emailVerified lastLoginAt loginHistory createdAt updatedAt",
+      "email role emailVerified lastLoginAt loginHistory createdAt updatedAt name googleId"
     );
 
     if (!user) {
@@ -248,7 +300,9 @@ router.get("/me", requireAuth, async (req, res) => {
         emailVerified: user.emailVerified,
         lastLoginAt: user.lastLoginAt,
         loginHistory: user.loginHistory,
-      },
+        name: user.name || "",
+        hasGoogleAccount: !!user.googleId
+      }
     });
   } catch (e) {
     console.error(e);
@@ -260,11 +314,13 @@ router.get("/me", requireAuth, async (req, res) => {
 router.get("/verify-email", async (req, res) => {
   try {
     const token = String(req.query.token || "");
-    if (!token) return res.status(400).json({ message: "Token nedostaje." });
+    if (!token) {
+      return res.status(400).json({ message: "Token nedostaje." });
+    }
 
     const user = await User.findOne({
       emailVerifyToken: token,
-      emailVerifyTokenExpiresAt: { $gt: new Date() },
+      emailVerifyTokenExpiresAt: { $gt: new Date() }
     });
 
     if (!user) {

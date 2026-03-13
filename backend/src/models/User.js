@@ -11,6 +11,12 @@ const loginEntrySchema = new mongoose.Schema(
 
 const userSchema = new mongoose.Schema(
   {
+    name: {
+      type: String,
+      trim: true,
+      default: ""
+    },
+
     email: {
       type: String,
       required: true,
@@ -18,9 +24,15 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       trim: true
     },
+
     passwordHash: {
       type: String,
-      required: true
+      default: null
+    },
+
+    googleId: {
+      type: String,
+      default: null
     },
 
     role: {
@@ -29,18 +41,42 @@ const userSchema = new mongoose.Schema(
       default: "USER"
     },
 
-
     lastLoginAt: { type: Date },
-    loginHistory: { type: [loginEntrySchema], default: [] },
 
-    failedLoginCount: { type: Number, default: 0 },
-    blockedUntil: { type: Date, default: null },
+    loginHistory: {
+      type: [loginEntrySchema],
+      default: []
+    },
 
-    refreshTokenHash: { type: String, default: null },
-    
-    emailVerified: { type: Boolean, default: false },
-    emailVerifyToken: { type: String, default: null },
-    emailVerifyTokenExpiresAt: { type: Date, default: null }
+    failedLoginCount: {
+      type: Number,
+      default: 0
+    },
+
+    blockedUntil: {
+      type: Date,
+      default: null
+    },
+
+    refreshTokenHash: {
+      type: String,
+      default: null
+    },
+
+    emailVerified: {
+      type: Boolean,
+      default: false
+    },
+
+    emailVerifyToken: {
+      type: String,
+      default: null
+    },
+
+    emailVerifyTokenExpiresAt: {
+      type: Date,
+      default: null
+    }
   },
   { timestamps: true }
 );

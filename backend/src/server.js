@@ -1,33 +1,40 @@
-import express from "express";
-import cors from "cors";
-import helmet from "helmet";
-import mongoose from "mongoose";
-import dotenv from "dotenv";
-
-import authRoutes from "./routes/auth.js";
-import adminRoutes from "./routes/admin.js";
-import contentRoutes from "./routes/content.js";
-import logAccess from "./middlewares/logAccess.js";
-
+const dotenv = require("dotenv");
 dotenv.config();
+const express = require("express");
+const cors = require("cors");
+const helmet = require("helmet");
+const mongoose = require("mongoose");
+const cookieParser = require("cookie-parser");
+
+const passport = require("./config/passport");
+const authRoutes = require("./routes/auth");
+const adminRoutes = require("./routes/admin");
+const contentRoutes = require("./routes/content");
+const logAccess = require("./middlewares/logAccess");
+
+
 const app = express();
 app.use(helmet());
+
 app.use(
   cors({
     origin: "http://localhost:3000",
-    credentials: true,
+    credentials: true
   })
 );
 
-
 app.use(express.json());
+app.use(cookieParser());
+app.use(passport.initialize());
+
 app.use("/api", logAccess);
+
 app.get("/", (req, res) => {
   res.json({ message: "Backend radi" });
 });
+
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
-
 app.use("/api/content", contentRoutes);
 
 async function start() {
