@@ -455,15 +455,26 @@ export default function DashboardPage() {
                 href="/content/1"
                 className="block rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-3 text-center font-medium text-blue-200 transition hover:bg-blue-500/20"
               >
-                Otvori Content #1
+                Opšti sadržaj (USER / MANAGER / ADMIN)
               </a>
 
-              <a
-                href="/content/2"
-                className="block rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-3 text-center font-medium text-blue-200 transition hover:bg-blue-500/20"
-              >
-                Otvori Content #2
-              </a>
+              {(user.role === "MANAGER" || user.role === "ADMIN") && (
+                <a
+                  href="/content/4"
+                  className="block rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-center font-medium text-amber-200 transition hover:bg-amber-500/20"
+                >
+                  Manager dokument
+                </a>
+              )}
+
+              {user.role === "ADMIN" && (
+                <a
+                  href="/content/3"
+                  className="block rounded-xl border border-purple-500/30 bg-purple-500/10 px-4 py-3 text-center font-medium text-purple-200 transition hover:bg-purple-500/20"
+                >
+                  Admin dokument
+                </a>
+              )}
 
               {user.role === "ADMIN" && (
                 <a
@@ -471,6 +482,15 @@ export default function DashboardPage() {
                   className="block rounded-xl border border-purple-500/30 bg-purple-500/10 px-4 py-3 text-center font-medium text-purple-200 transition hover:bg-purple-500/20"
                 >
                   Idi na Admin panel
+                </a>
+              )}
+
+              {user.role === "MANAGER" && (
+                <a
+                  href="/manager"
+                  className="block rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-center font-medium text-amber-200 transition hover:bg-amber-500/20"
+                >
+                  Idi na Manager panel
                 </a>
               )}
 

@@ -3,6 +3,7 @@ const User = require("../models/User");
 const AccessLog = require("../models/AccessLog");
 const requireAuth = require("../middlewares/requireAuth");
 const requireRole = require("../middlewares/requireRole");
+const mongoose = require("mongoose");
 
 const router = express.Router();
 
@@ -72,6 +73,45 @@ router.get(
         .populate("userId", "name email role");
 
       return res.json({ logs });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ message: "Greška na serveru." });
+    }
+  }
+);
+
+// ADMIN brise korisnike
+router.delete(
+  "/users/:id",
+  requireAuth,
+  requireRole("ADMIN"),
+  async (req, res) => {
+    try {
+      if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+        return res.status(400).json({ message: "Nevalidan ID korisnika." });
+      }
+
+      const targetUser = await User.findById(req.params.id);
+
+      if (!targetUser) {
+        return res.status(404).json({ message: "Korisnik nije pronađen." });
+      }
+
+      if (String(targetUser._id) === String(req.user.id)) {
+        return res.status(400).json({
+          message: "Admin ne može obrisati svoj nalog."
+        });
+      }
+
+      if (targetUser.role === "ADMIN") {
+        return res.status(403).json({
+          message: "Admin ne može obrisati drugog admin korisnika."
+        });
+      }
+
+      await User.findByIdAndDelete(req.params.id);
+
+      return res.json({ message: "Korisnik je uspešno obrisan." });
     } catch (e) {
       console.error(e);
       return res.status(500).json({ message: "Greška na serveru." });

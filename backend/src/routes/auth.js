@@ -84,6 +84,7 @@ router.post("/register", async (req, res) => {
     return res.status(201).json({
       message: "Korisnik uspešno registrovan.",
       token,
+      emailVerifyToken,
       user: {
         id: user._id,
         name: user.name,

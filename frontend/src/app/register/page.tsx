@@ -2,11 +2,8 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 
 export default function RegisterPage() {
-  const router = useRouter();
-
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -14,6 +11,7 @@ export default function RegisterPage() {
 
   const [msg, setMsg] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [verifyLink, setVerifyLink] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   function validatePassword(pw: string) {
@@ -24,6 +22,7 @@ export default function RegisterPage() {
     e.preventDefault();
     setMsg(null);
     setSuccess(null);
+    setVerifyLink(null);
 
     if (!name.trim() || !email.trim() || !password || !confirmPassword) {
       setMsg("Sva polja su obavezna.");
@@ -65,17 +64,17 @@ export default function RegisterPage() {
       }
 
       setSuccess(
-        "Uspešna registracija. Proveri email i potvrdi nalog pre logovanja.",
+        "Uspešna registracija. Email servis je mockovan, pa možeš odmah kliknuti na dugme ispod za verifikaciju naloga.",
       );
+
+      if (data?.emailVerifyToken) {
+        setVerifyLink(`/verify-email?token=${data.emailVerifyToken}`);
+      }
 
       setName("");
       setEmail("");
       setPassword("");
       setConfirmPassword("");
-
-      setTimeout(() => {
-        router.push("/login");
-      }, 2200);
     } catch {
       setMsg("Greška pri konekciji sa serverom.");
     } finally {
@@ -189,6 +188,15 @@ export default function RegisterPage() {
                   <div className="rounded-xl border border-green-500/20 bg-green-500/10 px-4 py-3 text-sm text-green-200">
                     {success}
                   </div>
+                ) : null}
+
+                {verifyLink ? (
+                  <a
+                    href={verifyLink}
+                    className="block rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-3 text-center font-semibold text-green-200 transition hover:bg-green-500/20"
+                  >
+                    Verifikuj email
+                  </a>
                 ) : null}
 
                 <button

@@ -6,14 +6,8 @@ const router = express.Router();
 const contentData = [
   {
     id: "1",
-    title: "User sadržaj",
-    text: "Ovo je sadržaj koji može da vidi USER, MANAGER i ADMIN.",
-    roles: ["USER", "MANAGER", "ADMIN"]
-  },
-  {
-    id: "2",
     title: "Opšti zaštićeni sadržaj",
-    text: "Ovo je drugi sadržaj dostupan svim ulogovanim korisnicima.",
+    text: "Ovo je sadržaj dostupan svim ulogovanim korisnicima: USER, MANAGER i ADMIN.",
     roles: ["USER", "MANAGER", "ADMIN"]
   },
   {

@@ -53,6 +53,7 @@ export default function AdminPage() {
   const [pageError, setPageError] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
 
   useEffect(() => {
     const token = getCookie("access_token");
@@ -94,11 +95,7 @@ export default function AdminPage() {
         const usersData: UsersResponse = await usersRes.json();
 
         if (!usersRes.ok) {
-          throw new Error(
-            usersData?.users
-              ? "Greška pri učitavanju korisnika."
-              : "Greška pri učitavanju korisnika.",
-          );
+          throw new Error("Greška pri učitavanju korisnika.");
         }
 
         setUsers(usersData.users || []);
@@ -166,6 +163,56 @@ export default function AdminPage() {
     }
   }
 
+  async function deleteUser(userId: string) {
+    const token = getCookie("access_token");
+
+    if (!token) {
+      setActionMsg("Nedostaje token.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Da li si siguran da želiš da obrišeš ovog korisnika?",
+    );
+
+    if (!confirmed) return;
+
+    setDeletingUserId(userId);
+    setActionMsg(null);
+
+    try {
+      const res = await fetch(
+        `http://localhost:5000/api/admin/users/${userId}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.message || "Brisanje korisnika nije uspelo.");
+      }
+
+      setUsers((prev) =>
+        prev.filter((user) => (user._id || user.id) !== userId),
+      );
+
+      setActionMsg("Korisnik je uspešno obrisan.");
+    } catch (err) {
+      setActionMsg(
+        err instanceof Error
+          ? err.message
+          : "Došlo je do greške pri brisanju korisnika.",
+      );
+    } finally {
+      setDeletingUserId(null);
+    }
+  }
+
   function handleRoleChange(
     userId: string,
     newRole: "USER" | "MANAGER" | "ADMIN",
@@ -222,8 +269,8 @@ export default function AdminPage() {
                 Upravljanje korisnicima
               </h1>
               <p className="mt-2 max-w-3xl text-slate-300">
-                Ovde administrator može da vidi sve korisnike sistema i da menja
-                njihove role.
+                Ovde administrator može da vidi sve korisnike sistema, menja
+                njihove role i briše naloge koji nisu admin.
               </p>
             </div>
 
@@ -264,7 +311,7 @@ export default function AdminPage() {
           <div className="mb-5">
             <h2 className="text-xl font-bold text-white">Svi korisnici</h2>
             <p className="mt-1 text-sm text-slate-400">
-              Pregled korisnika i promena role direktno iz admin panela.
+              Pregled korisnika, promena role i kontrola brisanja naloga.
             </p>
           </div>
 
@@ -288,7 +335,7 @@ export default function AdminPage() {
                     Poslednji login
                   </th>
                   <th className="px-4 py-2 text-left text-sm font-semibold text-slate-300">
-                    Promeni rolu
+                    Akcije
                   </th>
                 </tr>
               </thead>
@@ -296,6 +343,9 @@ export default function AdminPage() {
               <tbody>
                 {users.map((user) => {
                   const userId = user._id || user.id || "";
+                  const isMe = userId === me.id;
+                  const isAdminUser = user.role === "ADMIN";
+                  const canDelete = !isMe && !isAdminUser;
 
                   return (
                     <tr
@@ -365,6 +415,19 @@ export default function AdminPage() {
                           >
                             {savingUserId === userId ? "Čuvanje..." : "Sačuvaj"}
                           </button>
+
+                          {canDelete ? (
+                            <button
+                              type="button"
+                              disabled={deletingUserId === userId}
+                              onClick={() => deleteUser(userId)}
+                              className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {deletingUserId === userId
+                                ? "Brisanje..."
+                                : "Obriši"}
+                            </button>
+                          ) : null}
                         </div>
                       </td>
                     </tr>
