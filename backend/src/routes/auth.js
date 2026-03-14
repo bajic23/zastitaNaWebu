@@ -30,13 +30,22 @@ const hashToken = (token) =>
 // REGISTER
 router.post("/register", async (req, res) => {
   try {
-    const { email, password } = req.body ?? {};
+    const { name, email, password } = req.body ?? {};
 
-    if (!email || !password) {
-      return res.status(400).json({ message: "Email i lozinka su obavezni." });
+    if (!name || !email || !password) {
+      return res.status(400).json({
+        message: "Ime i prezime, email i lozinka su obavezni."
+      });
     }
 
+    const normalizedName = String(name).trim();
     const normalizedEmail = String(email).trim().toLowerCase();
+
+    if (!normalizedName) {
+      return res.status(400).json({
+        message: "Ime i prezime su obavezni."
+      });
+    }
 
     if (!isStrongPassword(password)) {
       return res.status(400).json({
@@ -57,6 +66,7 @@ router.post("/register", async (req, res) => {
     const emailVerifyTokenExpiresAt = new Date(Date.now() + 1000 * 60 * 30);
 
     const user = await User.create({
+      name: normalizedName,
       email: normalizedEmail,
       passwordHash,
       role: "USER",
@@ -76,6 +86,7 @@ router.post("/register", async (req, res) => {
       token,
       user: {
         id: user._id,
+        name: user.name,
         email: user.email,
         role: user.role,
         emailVerified: user.emailVerified
