@@ -7,12 +7,13 @@ type MeResponse = {
     id: string;
     name?: string;
     email: string;
-    role: "USER" | "ADMIN";
+    role: "USER" | "MANAGER" | "ADMIN";
     emailVerified: boolean;
     lastLoginAt?: string | null;
     loginHistory?: Array<{
       createdAt?: string;
       timestamp?: string;
+      at?: string;
       ip?: string;
       userAgent?: string;
     }>;
@@ -42,6 +43,13 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [profileMsg, setProfileMsg] = useState<string | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [savingProfile, setSavingProfile] = useState(false);
+
   useEffect(() => {
     const token = getCookie("access_token");
 
@@ -66,6 +74,8 @@ export default function DashboardPage() {
         }
 
         setUser(data.user);
+        setEditName(data.user.name || "");
+        setEditEmail(data.user.email || "");
         setError(null);
       } catch (err) {
         setError(
@@ -86,16 +96,72 @@ export default function DashboardPage() {
 
   const roleText = useMemo(() => {
     if (!user) return "";
-    return user.role === "ADMIN"
-      ? "Administrator ima pristup admin funkcijama i upravljanju sistemom."
-      : "Korisnik ima pristup standardnim zaštićenim rutama i sadržaju.";
+
+    if (user.role === "ADMIN") {
+      return "Administrator ima pristup admin funkcijama i upravljanju sistemom.";
+    }
+
+    if (user.role === "MANAGER") {
+      return "Manager ima pristup logovima i proširenim zaštićenim sadržajima.";
+    }
+
+    return "Korisnik ima pristup standardnim zaštićenim rutama i sadržaju.";
   }, [user]);
 
   const activityItems = useMemo(() => {
     if (!user?.loginHistory?.length) return [];
-
     return user.loginHistory.slice(0, 3);
   }, [user]);
+
+  async function handleProfileSave() {
+    const token = getCookie("access_token");
+
+    if (!token) {
+      setProfileError("Nedostaje token.");
+      return;
+    }
+
+    if (!editName.trim() || !editEmail.trim()) {
+      setProfileError("Ime i email su obavezni.");
+      return;
+    }
+
+    setSavingProfile(true);
+    setProfileError(null);
+    setProfileMsg(null);
+
+    try {
+      const res = await fetch("http://localhost:5000/api/auth/me", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: editName,
+          email: editEmail,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.message || "Izmena profila nije uspela.");
+      }
+
+      setUser(data.user);
+      setEditName(data.user.name || "");
+      setEditEmail(data.user.email || "");
+      setIsEditing(false);
+      setProfileMsg("Profil je uspešno ažuriran.");
+    } catch (err) {
+      setProfileError(
+        err instanceof Error ? err.message : "Došlo je do greške pri čuvanju.",
+      );
+    } finally {
+      setSavingProfile(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -154,7 +220,9 @@ export default function DashboardPage() {
           <h2 className="mb-3 text-3xl font-extrabold text-white">
             {user.role === "ADMIN"
               ? "Dobrodošao na admin dashboard"
-              : "Dobrodošao na svoj dashboard"}
+              : user.role === "MANAGER"
+                ? "Dobrodošao na manager dashboard"
+                : "Dobrodošao na svoj dashboard"}
           </h2>
 
           <p className="max-w-3xl text-slate-300">{roleText}</p>
@@ -222,23 +290,95 @@ export default function DashboardPage() {
 
         <section className="grid gap-4 lg:grid-cols-3">
           <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-lg lg:col-span-2">
-            <h3 className="mb-5 text-xl font-bold text-white">
-              Pregled profila
-            </h3>
+            <div className="mb-5 flex items-center justify-between gap-3">
+              <h3 className="text-xl font-bold text-white">Pregled profila</h3>
+
+              {!isEditing ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProfileMsg(null);
+                    setProfileError(null);
+                    setEditName(user.name || "");
+                    setEditEmail(user.email || "");
+                    setIsEditing(true);
+                  }}
+                  className="rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-2 text-sm font-medium text-blue-200 transition hover:bg-blue-500/20"
+                >
+                  Izmeni profil
+                </button>
+              ) : (
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditing(false);
+                      setProfileMsg(null);
+                      setProfileError(null);
+                      setEditName(user.name || "");
+                      setEditEmail(user.email || "");
+                    }}
+                    className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-700"
+                  >
+                    Otkaži
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={savingProfile}
+                    onClick={handleProfileSave}
+                    className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {savingProfile ? "Čuvanje..." : "Sačuvaj"}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {profileMsg ? (
+              <div className="mb-4 rounded-xl border border-green-500/20 bg-green-500/10 px-4 py-3 text-sm text-green-200">
+                {profileMsg}
+              </div>
+            ) : null}
+
+            {profileError ? (
+              <div className="mb-4 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                {profileError}
+              </div>
+            ) : null}
 
             <div className="space-y-4">
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                 <span className="text-sm text-slate-400">Ime</span>
-                <span className="text-sm font-semibold text-white">
-                  {user.name || "Nema imena"}
-                </span>
+
+                {isEditing ? (
+                  <input
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    className="w-70 rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-white outline-none transition focus:border-blue-500"
+                  />
+                ) : (
+                  <span className="text-sm font-semibold text-white">
+                    {user.name || "Nema imena"}
+                  </span>
+                )}
               </div>
 
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                 <span className="text-sm text-slate-400">Email</span>
-                <span className="text-sm font-semibold text-white">
-                  {user.email}
-                </span>
+
+                {isEditing ? (
+                  <input
+                    type="email"
+                    value={editEmail}
+                    onChange={(e) => setEditEmail(e.target.value)}
+                    className="w-70 rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-white outline-none transition focus:border-blue-500"
+                  />
+                ) : (
+                  <span className="text-sm font-semibold text-white">
+                    {user.email}
+                  </span>
+                )}
               </div>
 
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -277,7 +417,8 @@ export default function DashboardPage() {
             <div className="mt-6 space-y-3">
               {activityItems.length > 0 ? (
                 activityItems.map((item, index) => {
-                  const time = item.createdAt || item.timestamp || null;
+                  const time =
+                    item.createdAt || item.timestamp || item.at || null;
 
                   return (
                     <div
@@ -332,13 +473,6 @@ export default function DashboardPage() {
                   Idi na Admin panel
                 </a>
               )}
-
-              <a
-                href="/login"
-                className="block rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-center font-medium text-slate-200 transition hover:bg-slate-700"
-              >
-                Login stranica
-              </a>
 
               <a
                 href="/logout"

@@ -134,8 +134,7 @@ export default function LoginPage() {
               <button
                 type="button"
                 onClick={() => {
-                  window.location.href =
-                    "http://localhost:5000/api/auth/google";
+                  router.push("/register");
                 }}
                 className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 font-semibold text-slate-100 transition hover:bg-slate-700"
               >
@@ -145,9 +144,6 @@ export default function LoginPage() {
               <div className="mt-8 rounded-2xl border border-slate-800 bg-slate-950/40 p-4 md:hidden">
                 <p className="text-sm font-semibold text-white">
                   ZaštitaNaWebu
-                </p>
-                <p className="mt-1 text-sm text-slate-400">
-                  JWT, Google OAuth, RBAC i zaštita ruta u jednoj aplikaciji.
                 </p>
               </div>
             </div>

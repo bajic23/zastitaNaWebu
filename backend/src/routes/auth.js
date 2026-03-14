@@ -320,6 +320,66 @@ router.get("/me", requireAuth, async (req, res) => {
     return res.status(500).json({ message: "Greška na serveru." });
   }
 });
+// UPDATE ME
+router.patch("/me", requireAuth, async (req, res) => {
+  try {
+    const { name, email } = req.body ?? {};
+
+    if (!name || !email) {
+      return res.status(400).json({
+        message: "Ime i email su obavezni."
+      });
+    }
+
+    const normalizedName = String(name).trim();
+    const normalizedEmail = String(email).trim().toLowerCase();
+
+    if (!normalizedName || !normalizedEmail) {
+      return res.status(400).json({
+        message: "Ime i email su obavezni."
+      });
+    }
+
+    const existingUserWithEmail = await User.findOne({
+      email: normalizedEmail,
+      _id: { $ne: req.user.id }
+    });
+
+    if (existingUserWithEmail) {
+      return res.status(409).json({
+        message: "Korisnik sa ovim email-om već postoji."
+      });
+    }
+
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({ message: "Korisnik nije pronađen." });
+    }
+
+    user.name = normalizedName;
+    user.email = normalizedEmail;
+
+    await user.save();
+
+    return res.json({
+      message: "Profil je uspešno ažuriran.",
+      user: {
+        id: user._id,
+        name: user.name || "",
+        email: user.email,
+        role: user.role,
+        emailVerified: user.emailVerified,
+        lastLoginAt: user.lastLoginAt,
+        loginHistory: user.loginHistory,
+        hasGoogleAccount: !!user.googleId
+      }
+    });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ message: "Greška na serveru." });
+  }
+});
 
 // VERIFY EMAIL
 router.get("/verify-email", async (req, res) => {
