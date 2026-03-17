@@ -7,7 +7,7 @@ passport.use(
     {
       clientID: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL: "http://localhost:5000/api/auth/google/callback"
+      callbackURL: "http://localhost:5000/api/auth/google/callback",
     },
     async (accessToken, refreshToken, profile, done) => {
       try {
@@ -24,8 +24,8 @@ passport.use(
             name: profile.displayName || "",
             email,
             googleId: profile.id,
-            role: "USER",
-            emailVerified: true
+            role: "PUTNIK",
+            emailVerified: true,
           });
         } else {
           if (!user.googleId) {
@@ -47,8 +47,8 @@ passport.use(
       } catch (error) {
         return done(error, null);
       }
-    }
-  )
+    },
+  ),
 );
 
 module.exports = passport;
