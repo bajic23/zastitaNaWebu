@@ -1,16 +1,17 @@
 const express = require("express");
+const mongoose = require("mongoose");
+
 const User = require("../models/User");
 const AccessLog = require("../models/AccessLog");
 const requireAuth = require("../middlewares/requireAuth");
 const requireRole = require("../middlewares/requireRole");
-const mongoose = require("mongoose");
 
 const router = express.Router();
 
-// ADMIN vidi sve usere
-router.get("/users", requireAuth, requireRole("ADMIN"), async (req, res) => {
+// OPERATOR vidi sve PUTNIKE
+router.get("/users", requireAuth, requireRole("OPERATOR"), async (req, res) => {
   try {
-    const users = await User.find({})
+    const users = await User.find({ role: "PUTNIK" })
       .select("name email role emailVerified lastLoginAt createdAt updatedAt")
       .sort({ createdAt: -1 });
 
@@ -21,50 +22,36 @@ router.get("/users", requireAuth, requireRole("ADMIN"), async (req, res) => {
   }
 });
 
-// ADMIN menja role korisnicima
-router.patch("/users/:id/role", requireAuth, requireRole("ADMIN"), async (req, res) => {
+// PUTNIKA READ by ID
+router.get("/users/:id", requireAuth, requireRole("OPERATOR"), async (req, res) => {
   try {
-    const { role } = req.body ?? {};
-
-    if (!["USER", "MANAGER", "ADMIN"].includes(role)) {
-      return res.status(400).json({ message: "Nevalidna rola." });
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: "Nevalidan ID korisnika." });
     }
 
-    const targetUser = await User.findById(req.params.id);
+    const user = await User.findOne({
+      _id: req.params.id,
+      role: "PUTNIK"
+    }).select(
+      "name email role emailVerified lastLoginAt loginHistory createdAt updatedAt"
+    );
 
-    if (!targetUser) {
-      return res.status(404).json({ message: "Korisnik nije pronađen." });
+    if (!user) {
+      return res.status(404).json({ message: "Putnik nije pronađen." });
     }
 
-    if (String(targetUser._id) === String(req.user.id) && role !== "ADMIN") {
-      return res.status(400).json({
-        message: "Admin ne može sebi ukloniti ADMIN rolu."
-      });
-    }
-
-    targetUser.role = role;
-    await targetUser.save();
-
-    return res.json({
-      message: "Rola uspešno promenjena.",
-      user: {
-        id: targetUser._id,
-        name: targetUser.name,
-        email: targetUser.email,
-        role: targetUser.role
-      }
-    });
+    return res.json({ user });
   } catch (e) {
     console.error(e);
     return res.status(500).json({ message: "Greška na serveru." });
   }
 });
 
-// ADMIN i MANAGER vide access logove
+// OPERATOR access logs
 router.get(
   "/access-logs",
   requireAuth,
-  requireRole("ADMIN", "MANAGER"),
+  requireRole("OPERATOR"),
   async (req, res) => {
     try {
       const logs = await AccessLog.find({})
@@ -80,11 +67,11 @@ router.get(
   }
 );
 
-// ADMIN brise korisnike
+// PUTNIK delete
 router.delete(
   "/users/:id",
   requireAuth,
-  requireRole("ADMIN"),
+  requireRole("OPERATOR"),
   async (req, res) => {
     try {
       if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
@@ -99,19 +86,19 @@ router.delete(
 
       if (String(targetUser._id) === String(req.user.id)) {
         return res.status(400).json({
-          message: "Admin ne može obrisati svoj nalog."
+          message: "Operator ne može obrisati svoj nalog."
         });
       }
 
-      if (targetUser.role === "ADMIN") {
+      if (targetUser.role !== "PUTNIK") {
         return res.status(403).json({
-          message: "Admin ne može obrisati drugog admin korisnika."
+          message: "Operator može obrisati samo PUTNIKA."
         });
       }
 
       await User.findByIdAndDelete(req.params.id);
 
-      return res.json({ message: "Korisnik je uspešno obrisan." });
+      return res.json({ message: "Putnik je uspešno obrisan." });
     } catch (e) {
       console.error(e);
       return res.status(500).json({ message: "Greška na serveru." });

@@ -9,6 +9,34 @@ const User = require("../models/User");
 const requireAuth = require("../middlewares/requireAuth");
 
 const router = express.Router();
+const handleValidation = require("../middlewares/handleValidation");
+const {
+  registerValidator,
+  loginValidator,
+  updateMeValidator
+} = require("../validators");
+const ACCESS_COOKIE_NAME = "accessToken";
+
+function getAccessTokenCookieOptions() {
+  const isProduction = process.env.NODE_ENV === "production";
+
+  return {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? "none" : "lax",
+    maxAge: 1000 * 60 * 15
+  };
+}
+
+function clearAccessTokenCookie(res) {
+  const isProduction = process.env.NODE_ENV === "production";
+
+  res.clearCookie(ACCESS_COOKIE_NAME, {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? "none" : "lax"
+  });
+}
 
 function isStrongPassword(pw) {
   return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{10,}$/.test(pw);
@@ -28,7 +56,7 @@ const hashToken = (token) =>
   crypto.createHash("sha256").update(token).digest("hex");
 
 // REGISTER
-router.post("/register", async (req, res) => {
+router.post("/register", registerValidator, handleValidation, async (req, res) => {
   try {
     const { name, email, password } = req.body ?? {};
 
@@ -69,21 +97,14 @@ router.post("/register", async (req, res) => {
       name: normalizedName,
       email: normalizedEmail,
       passwordHash,
-      role: "USER",
+      role: "PUTNIK",
       emailVerified: false,
       emailVerifyToken,
       emailVerifyTokenExpiresAt
     });
 
-    const token = jwt.sign(
-      { sub: user._id.toString(), role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: "15m" }
-    );
-
     return res.status(201).json({
-      message: "Korisnik uspešno registrovan.",
-      token,
+      message: "Korisnik uspešno registrovan. Potvrdi email pre prijave.",
       emailVerifyToken,
       user: {
         id: user._id,
@@ -100,7 +121,7 @@ router.post("/register", async (req, res) => {
 });
 
 // LOGIN
-router.post("/login", loginLimiter, async (req, res) => {
+router.post("/login", loginLimiter, loginValidator, handleValidation, async (req, res) => {
   try {
     const { email, password } = req.body ?? {};
 
@@ -163,17 +184,28 @@ router.post("/login", loginLimiter, async (req, res) => {
 
     await user.save();
 
-    const token = jwt.sign(
+    const accessToken = jwt.sign(
       { sub: user._id.toString(), role: user.role },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN || "15m" }
     );
 
+    res.cookie(
+      ACCESS_COOKIE_NAME,
+      accessToken,
+      getAccessTokenCookieOptions()
+    );
+
     return res.json({
       message: "Uspešno logovanje.",
-      token,
       refreshToken,
-      user: { id: user._id, email: user.email, role: user.role }
+      user: {
+        id: user._id,
+        email: user.email,
+        role: user.role,
+        name: user.name || "",
+        emailVerified: user.emailVerified
+      }
     });
   } catch (error) {
     console.error(error);
@@ -210,14 +242,20 @@ router.get(
 
       await req.user.save();
 
-      const token = jwt.sign(
+      const accessToken = jwt.sign(
         { sub: req.user._id.toString(), role: req.user.role },
         process.env.JWT_SECRET,
         { expiresIn: process.env.JWT_EXPIRES_IN || "15m" }
       );
 
+      res.cookie(
+        ACCESS_COOKIE_NAME,
+        accessToken,
+        getAccessTokenCookieOptions()
+      );
+
       return res.redirect(
-        `http://localhost:3000/login/success?token=${encodeURIComponent(token)}&refreshToken=${encodeURIComponent(refreshToken)}`
+        `http://localhost:3000/login/success?refreshToken=${encodeURIComponent(refreshToken)}`
       );
     } catch (error) {
       console.error(error);
@@ -232,6 +270,7 @@ router.post("/logout", async (req, res) => {
     const { refreshToken } = req.body ?? {};
 
     if (!refreshToken) {
+      clearAccessTokenCookie(res);
       return res.status(400).json({ message: "Nedostaje refreshToken." });
     }
 
@@ -239,12 +278,14 @@ router.post("/logout", async (req, res) => {
 
     const user = await User.findOne({ refreshTokenHash: refreshHash });
     if (!user) {
+      clearAccessTokenCookie(res);
       return res.status(204).send();
     }
 
     user.refreshTokenHash = null;
     await user.save();
 
+    clearAccessTokenCookie(res);
     return res.status(204).send();
   } catch (e) {
     console.error(e);
@@ -283,8 +324,14 @@ router.post("/refresh", async (req, res) => {
       { expiresIn: process.env.JWT_EXPIRES_IN || "15m" }
     );
 
-    return res.json({
+    res.cookie(
+      ACCESS_COOKIE_NAME,
       accessToken,
+      getAccessTokenCookieOptions()
+    );
+
+    return res.json({
+      message: "Token uspešno osvežen.",
       refreshToken: newRefreshToken
     });
   } catch (e) {
@@ -321,8 +368,9 @@ router.get("/me", requireAuth, async (req, res) => {
     return res.status(500).json({ message: "Greška na serveru." });
   }
 });
+
 // UPDATE ME
-router.patch("/me", requireAuth, async (req, res) => {
+router.patch("/me", requireAuth, updateMeValidator, handleValidation, async (req, res) => {
   try {
     const { name, email } = req.body ?? {};
 

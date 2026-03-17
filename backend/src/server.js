@@ -1,26 +1,31 @@
 const dotenv = require("dotenv");
 dotenv.config();
+
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
+const compression = require("compression");
 const mongoose = require("mongoose");
 const cookieParser = require("cookie-parser");
 
 const passport = require("./config/passport");
 const authRoutes = require("./routes/auth");
 const adminRoutes = require("./routes/admin");
-const contentRoutes = require("./routes/content");
+const destinationRoutes = require("./routes/destinations");
+const travelRoutes = require("./routes/travels");
 const logAccess = require("./middlewares/logAccess");
 
-
 const app = express();
+
+app.use("/uploads", express.static("uploads"));
 app.use(helmet());
+app.use(compression());
 
 app.use(
   cors({
     origin: "http://localhost:3000",
-    credentials: true
-  })
+    credentials: true,
+  }),
 );
 
 app.use(express.json());
@@ -35,11 +40,14 @@ app.get("/", (req, res) => {
 
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
-app.use("/api/content", contentRoutes);
+app.use("/api/destinations", destinationRoutes);
+app.use("/api/travels", travelRoutes);
 
 async function start() {
   try {
-    await mongoose.connect(process.env.MONGO_URI);
+    await mongoose.connect(process.env.MONGO_URI, {
+      dbName: "travel-api",
+    });
 
     console.log("MongoDB connected");
 

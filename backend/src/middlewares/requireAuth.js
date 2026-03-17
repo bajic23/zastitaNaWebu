@@ -1,11 +1,19 @@
 const jwt = require("jsonwebtoken");
 
 module.exports = function requireAuth(req, res, next) {
-  const header = req.headers.authorization || "";
-  const [type, token] = header.split(" ");
+  let token = req.cookies?.accessToken || null;
 
-  if (type !== "Bearer" || !token) {
-    return res.status(401).json({ message: "Nedostaje Bearer token." });
+  if (!token) {
+    const header = req.headers.authorization || "";
+    const [type, bearerToken] = header.split(" ");
+
+    if (type === "Bearer" && bearerToken) {
+      token = bearerToken;
+    }
+  }
+
+  if (!token) {
+    return res.status(401).json({ message: "Niste autentifikovani." });
   }
 
   try {

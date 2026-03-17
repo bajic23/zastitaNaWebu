@@ -18,3 +18,16 @@ npm-debug.log*
 # OS files
 .DS_Store
 Thumbs.db
+
+# Uploads (slike)
+backend/uploads/
+
+# Build output backend
+dist/
+build/
+
+# Coverage
+coverage/
+
+# VS Code
+.vscode/

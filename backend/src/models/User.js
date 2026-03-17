@@ -37,8 +37,8 @@ const userSchema = new mongoose.Schema(
 
     role: {
       type: String,
-      enum: ["USER", "ADMIN", "MANAGER"],
-      default: "USER"
+      enum: ["PUTNIK","OPERATOR"],
+      default: "PUTNIK"
     },
 
     lastLoginAt: { type: Date },
