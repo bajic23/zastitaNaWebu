@@ -1,38 +1,33 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+
+type UserRole = "PUTNIK" | "OPERATOR";
+
+type LoginHistoryItem = {
+  at?: string;
+  ip?: string;
+  userAgent?: string;
+};
 
 type MeResponse = {
   user: {
     id: string;
     name?: string;
     email: string;
-    role: "USER" | "MANAGER" | "ADMIN";
+    role: UserRole;
     emailVerified: boolean;
     lastLoginAt?: string | null;
-    loginHistory?: Array<{
-      createdAt?: string;
-      timestamp?: string;
-      at?: string;
-      ip?: string;
-      userAgent?: string;
-    }>;
+    loginHistory?: LoginHistoryItem[];
     hasGoogleAccount?: boolean;
   };
 };
-
-function getCookie(name: string) {
-  return document.cookie
-    .split("; ")
-    .find((row) => row.startsWith(`${name}=`))
-    ?.split("=")[1];
-}
 
 function formatDate(value?: string | null) {
   if (!value) return "Nema podatka";
 
   const date = new Date(value);
-
   if (Number.isNaN(date.getTime())) return "Nema podatka";
 
   return date.toLocaleString("sr-RS");
@@ -49,23 +44,17 @@ export default function DashboardPage() {
   const [profileMsg, setProfileMsg] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [savingProfile, setSavingProfile] = useState(false);
+  const [deletingProfile, setDeletingProfile] = useState(false);
 
   useEffect(() => {
-    const token = getCookie("access_token");
-
-    if (!token) {
-      setError("Niste ulogovani.");
-      setLoading(false);
-      return;
-    }
-
     async function loadMe() {
       try {
-        const res = await fetch("http://localhost:5000/api/auth/me", {
-          headers: {
-            Authorization: `Bearer ${token}`,
+        const res = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`,
+          {
+            credentials: "include",
           },
-        });
+        );
 
         const data = await res.json();
 
@@ -97,30 +86,19 @@ export default function DashboardPage() {
   const roleText = useMemo(() => {
     if (!user) return "";
 
-    if (user.role === "ADMIN") {
-      return "Administrator ima pristup admin funkcijama i upravljanju sistemom.";
+    if (user.role === "OPERATOR") {
+      return "Operator upravlja putnicima, destinacijama, putovanjima i pristupnim logovima.";
     }
 
-    if (user.role === "MANAGER") {
-      return "Manager ima pristup logovima i proširenim zaštićenim sadržajima.";
-    }
-
-    return "Korisnik ima pristup standardnim zaštićenim rutama i sadržaju.";
+    return "Putnik ima pristup svom profilu i javnom pregledu putovanja.";
   }, [user]);
 
   const activityItems = useMemo(() => {
     if (!user?.loginHistory?.length) return [];
-    return user.loginHistory.slice(0, 3);
+    return user.loginHistory.slice(-3).reverse();
   }, [user]);
 
   async function handleProfileSave() {
-    const token = getCookie("access_token");
-
-    if (!token) {
-      setProfileError("Nedostaje token.");
-      return;
-    }
-
     if (!editName.trim() || !editEmail.trim()) {
       setProfileError("Ime i email su obavezni.");
       return;
@@ -131,17 +109,20 @@ export default function DashboardPage() {
     setProfileMsg(null);
 
     try {
-      const res = await fetch("http://localhost:5000/api/auth/me", {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            name: editName.trim(),
+            email: editEmail.trim(),
+          }),
         },
-        body: JSON.stringify({
-          name: editName,
-          email: editEmail,
-        }),
-      });
+      );
 
       const data = await res.json();
 
@@ -163,13 +144,50 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleDeleteProfile() {
+    const confirmed = window.confirm(
+      "Da li sigurno želiš da obrišeš svoj profil? Ova akcija je nepovratna.",
+    );
+
+    if (!confirmed) return;
+
+    setDeletingProfile(true);
+    setProfileError(null);
+    setProfileMsg(null);
+
+    try {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`,
+        {
+          method: "DELETE",
+          credentials: "include",
+        },
+      );
+
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        throw new Error(data?.message || "Brisanje profila nije uspelo.");
+      }
+
+      localStorage.removeItem("refreshToken");
+      window.location.href = "/login";
+    } catch (err) {
+      setProfileError(
+        err instanceof Error
+          ? err.message
+          : "Došlo je do greške pri brisanju profila.",
+      );
+    } finally {
+      setDeletingProfile(false);
+    }
+  }
+
   if (loading) {
     return (
-      <main className="min-h-screen px-4 py-8 text-slate-100">
-        <div className="mx-auto max-w-6xl">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-lg">
-            <p className="text-slate-300">Učitavanje dashboard-a...</p>
-          </div>
+      <main className="min-h-screen bg-slate-950 px-4 py-8 text-slate-100">
+        <div className="mx-auto max-w-6xl rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-lg">
+          <p className="text-slate-300">Učitavanje dashboard-a...</p>
         </div>
       </main>
     );
@@ -177,22 +195,20 @@ export default function DashboardPage() {
 
   if (error || !user) {
     return (
-      <main className="min-h-screen px-4 py-8 text-slate-100">
-        <div className="mx-auto max-w-4xl">
-          <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-6 shadow-lg">
-            <h1 className="text-2xl font-bold text-white">Greška</h1>
-            <p className="mt-2 text-red-200">
-              {error || "Korisnik nije pronađen."}
-            </p>
+      <main className="min-h-screen bg-slate-950 px-4 py-8 text-slate-100">
+        <div className="mx-auto max-w-4xl rounded-2xl border border-red-500/20 bg-red-500/10 p-6 shadow-lg">
+          <h1 className="text-2xl font-bold text-white">Greška</h1>
+          <p className="mt-2 text-red-200">
+            {error || "Korisnik nije pronađen."}
+          </p>
 
-            <div className="mt-4">
-              <a
-                href="/login"
-                className="inline-block rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 font-medium text-slate-200 transition hover:bg-slate-700"
-              >
-                Idi na login
-              </a>
-            </div>
+          <div className="mt-4">
+            <Link
+              href="/login"
+              className="inline-block rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 font-medium text-slate-200 transition hover:bg-slate-700"
+            >
+              Idi na login
+            </Link>
           </div>
         </div>
       </main>
@@ -200,12 +216,12 @@ export default function DashboardPage() {
   }
 
   return (
-    <main className="min-h-screen px-4 py-8 text-slate-100">
+    <main className="min-h-screen bg-slate-950 px-4 py-8 text-slate-100">
       <div className="mx-auto max-w-6xl">
         <header className="mb-6 flex flex-col gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5 shadow-lg backdrop-blur md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-2xl font-bold text-white">ZaštitaNaWebu</h1>
-            <p className="text-sm text-slate-400">Security dashboard</p>
+            <p className="text-sm text-slate-400">Korisnički dashboard</p>
           </div>
 
           <div className="text-left md:text-right">
@@ -218,11 +234,9 @@ export default function DashboardPage() {
 
         <section className="mb-6 rounded-3xl border border-blue-500/20 bg-linear-to-br from-blue-600/20 to-slate-900 p-6 shadow-xl">
           <h2 className="mb-3 text-3xl font-extrabold text-white">
-            {user.role === "ADMIN"
-              ? "Dobrodošao na admin dashboard"
-              : user.role === "MANAGER"
-                ? "Dobrodošao na manager dashboard"
-                : "Dobrodošao na svoj dashboard"}
+            {user.role === "OPERATOR"
+              ? "Dobrodošao na operator dashboard"
+              : "Dobrodošao na svoj dashboard"}
           </h2>
 
           <p className="max-w-3xl text-slate-300">{roleText}</p>
@@ -264,8 +278,8 @@ export default function DashboardPage() {
             </p>
             <p className="mt-2 text-sm text-slate-300">
               {user.emailVerified
-                ? "Nalog je uspešno verifikovan"
-                : "Potrebna je verifikacija email adrese"}
+                ? "Nalog je uspešno verifikovan."
+                : "Potrebna je verifikacija email adrese."}
             </p>
           </div>
 
@@ -273,7 +287,7 @@ export default function DashboardPage() {
             <p className="text-sm text-slate-400">Način prijave</p>
             <p className="mt-2 text-2xl font-bold text-white">{authMethod}</p>
             <p className="mt-2 text-sm text-slate-300">
-              Prikaz stvarnog auth mehanizma korisnika
+              Prikaz aktivnog auth mehanizma korisnika.
             </p>
           </div>
 
@@ -283,14 +297,14 @@ export default function DashboardPage() {
               {formatDate(user.lastLoginAt)}
             </p>
             <p className="mt-2 text-sm text-slate-300">
-              Poslednja evidentirana aktivnost
+              Poslednja zabeležena aktivnost korisnika.
             </p>
           </div>
         </section>
 
         <section className="grid gap-4 lg:grid-cols-3">
           <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-lg lg:col-span-2">
-            <div className="mb-5 flex items-center justify-between gap-3">
+            <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <h3 className="text-xl font-bold text-white">Pregled profila</h3>
 
               {!isEditing ? (
@@ -308,7 +322,7 @@ export default function DashboardPage() {
                   Izmeni profil
                 </button>
               ) : (
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
                     onClick={() => {
@@ -348,14 +362,14 @@ export default function DashboardPage() {
             ) : null}
 
             <div className="space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex flex-col gap-2 border-b border-slate-800 pb-3 md:flex-row md:items-center md:justify-between">
                 <span className="text-sm text-slate-400">Ime</span>
 
                 {isEditing ? (
                   <input
                     value={editName}
                     onChange={(e) => setEditName(e.target.value)}
-                    className="w-70 rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-white outline-none transition focus:border-blue-500"
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-white outline-none transition focus:border-blue-500 md:w-80"
                   />
                 ) : (
                   <span className="text-sm font-semibold text-white">
@@ -364,7 +378,7 @@ export default function DashboardPage() {
                 )}
               </div>
 
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex flex-col gap-2 border-b border-slate-800 pb-3 md:flex-row md:items-center md:justify-between">
                 <span className="text-sm text-slate-400">Email</span>
 
                 {isEditing ? (
@@ -372,7 +386,7 @@ export default function DashboardPage() {
                     type="email"
                     value={editEmail}
                     onChange={(e) => setEditEmail(e.target.value)}
-                    className="w-70 rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-white outline-none transition focus:border-blue-500"
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-white outline-none transition focus:border-blue-500 md:w-80"
                   />
                 ) : (
                   <span className="text-sm font-semibold text-white">
@@ -414,36 +428,42 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            <div className="mt-6 space-y-3">
-              {activityItems.length > 0 ? (
-                activityItems.map((item, index) => {
-                  const time =
-                    item.createdAt || item.timestamp || item.at || null;
+            <div className="mt-6">
+              <div className="mb-3 flex items-center justify-between">
+                <h4 className="text-base font-semibold text-white">
+                  Poslednje prijave
+                </h4>
+              </div>
 
-                  return (
+              <div className="space-y-3">
+                {activityItems.length > 0 ? (
+                  activityItems.map((item, index) => (
                     <div
-                      key={index}
+                      key={`${item.at || "login"}-${index}`}
                       className="rounded-xl border border-slate-800 bg-slate-950/50 p-4"
                     >
                       <p className="text-sm font-semibold text-white">
                         Uspešna prijava na sistem
                       </p>
                       <p className="mt-1 text-sm text-slate-400">
-                        {formatDate(time)}
+                        {formatDate(item.at)}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        IP: {item.ip || "Nema podatka"}
                       </p>
                     </div>
-                  );
-                })
-              ) : (
-                <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
-                  <p className="text-sm font-semibold text-white">
-                    Nema istorije prijava
-                  </p>
-                  <p className="mt-1 text-sm text-slate-400">
-                    Login history još nije dostupna.
-                  </p>
-                </div>
-              )}
+                  ))
+                ) : (
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+                    <p className="text-sm font-semibold text-white">
+                      Nema istorije prijava
+                    </p>
+                    <p className="mt-1 text-sm text-slate-400">
+                      Login history još nije dostupna.
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -451,55 +471,46 @@ export default function DashboardPage() {
             <h3 className="mb-5 text-xl font-bold text-white">Brze akcije</h3>
 
             <div className="space-y-3">
-              <a
-                href="/content/1"
+              <Link
+                href="/travels"
                 className="block rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-3 text-center font-medium text-blue-200 transition hover:bg-blue-500/20"
               >
-                Opšti sadržaj (USER / MANAGER / ADMIN)
-              </a>
+                Pregled svih putovanja
+              </Link>
 
-              {(user.role === "MANAGER" || user.role === "ADMIN") && (
-                <a
-                  href="/content/4"
-                  className="block rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-center font-medium text-amber-200 transition hover:bg-amber-500/20"
-                >
-                  Manager dokument
-                </a>
-              )}
+              {user.role === "OPERATOR" ? (
+                <>
+                  <Link
+                    href="/admin"
+                    className="block rounded-xl border border-purple-500/30 bg-purple-500/10 px-4 py-3 text-center font-medium text-purple-200 transition hover:bg-purple-500/20"
+                  >
+                    Upravljanje putnicima
+                  </Link>
 
-              {user.role === "ADMIN" && (
-                <a
-                  href="/content/3"
-                  className="block rounded-xl border border-purple-500/30 bg-purple-500/10 px-4 py-3 text-center font-medium text-purple-200 transition hover:bg-purple-500/20"
-                >
-                  Admin dokument
-                </a>
-              )}
+                  <Link
+                    href="/logs"
+                    className="block rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-center font-medium text-amber-200 transition hover:bg-amber-500/20"
+                  >
+                    Pristupni logovi
+                  </Link>
+                </>
+              ) : null}
 
-              {user.role === "ADMIN" && (
-                <a
-                  href="/admin"
-                  className="block rounded-xl border border-purple-500/30 bg-purple-500/10 px-4 py-3 text-center font-medium text-purple-200 transition hover:bg-purple-500/20"
-                >
-                  Idi na Admin panel
-                </a>
-              )}
+              <button
+                type="button"
+                onClick={handleDeleteProfile}
+                disabled={deletingProfile}
+                className="w-full rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-center font-medium text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {deletingProfile ? "Brisanje profila..." : "Obriši moj profil"}
+              </button>
 
-              {user.role === "MANAGER" && (
-                <a
-                  href="/manager"
-                  className="block rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-center font-medium text-amber-200 transition hover:bg-amber-500/20"
-                >
-                  Idi na Manager panel
-                </a>
-              )}
-
-              <a
+              <Link
                 href="/logout"
-                className="block rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-center font-medium text-red-200 transition hover:bg-red-500/20"
+                className="block rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-center font-medium text-slate-200 transition hover:bg-slate-700"
               >
                 Logout
-              </a>
+              </Link>
             </div>
           </div>
         </section>

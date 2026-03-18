@@ -19,11 +19,15 @@ export default function LoginPage() {
     setMsg(null);
 
     try {
-      const res = await fetch("http://localhost:5000/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/auth/login`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ email, password }),
+        },
+      );
 
       const data = await res.json();
 
@@ -32,10 +36,8 @@ export default function LoginPage() {
         return;
       }
 
-      document.cookie = `access_token=${data.token}; Path=/; SameSite=Lax`;
-      document.cookie = `role=${data.user.role}; Path=/; SameSite=Lax`;
-
       router.replace(next);
+      router.refresh();
     } catch {
       setMsg("Greška pri konekciji sa serverom.");
     } finally {
@@ -115,8 +117,7 @@ export default function LoginPage() {
               <button
                 type="button"
                 onClick={() => {
-                  window.location.href =
-                    "http://localhost:5000/api/auth/google";
+                  window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/api/auth/google`;
                 }}
                 className="mt-6 w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 font-semibold text-slate-100 transition hover:bg-slate-700"
               >

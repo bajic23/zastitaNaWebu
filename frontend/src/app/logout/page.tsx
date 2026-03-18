@@ -6,9 +6,27 @@ export default function Logout() {
   const router = useRouter();
 
   useEffect(() => {
-    document.cookie = "access_token=; Path=/; Max-Age=0";
-    document.cookie = "role=; Path=/; Max-Age=0";
-    router.replace("/login");
+    async function logout() {
+      try {
+        await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/logout`, {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            refreshToken: localStorage.getItem("refreshToken"),
+          }),
+        });
+      } catch {}
+
+      localStorage.removeItem("refreshToken");
+
+      router.replace("/login");
+      router.refresh();
+    }
+
+    logout();
   }, [router]);
 
   return null;

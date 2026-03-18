@@ -1,16 +1,20 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-function decodeJwtPayload(token: string): any | null {
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
   try {
     const parts = token.split(".");
     if (parts.length !== 3) return null;
+
     const payload = parts[1];
-    const json = Buffer.from(
-      payload.replace(/-/g, "+").replace(/_/g, "/"),
-      "base64",
-    ).toString("utf8");
-    return JSON.parse(json);
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64.padEnd(
+      base64.length + ((4 - (base64.length % 4)) % 4),
+      "=",
+    );
+
+    const json = atob(padded);
+    return JSON.parse(json) as Record<string, unknown>;
   } catch {
     return null;
   }
@@ -22,6 +26,8 @@ export function middleware(req: NextRequest) {
   const isProtected =
     pathname.startsWith("/dashboard") ||
     pathname.startsWith("/admin") ||
+    pathname.startsWith("/manager") ||
+    pathname.startsWith("/logs") ||
     pathname.startsWith("/content");
 
   if (!isProtected) return NextResponse.next();
@@ -35,21 +41,40 @@ export function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // ADMIN GUARD
-  if (pathname.startsWith("/admin")) {
-    const payload = decodeJwtPayload(token);
-    const role = payload?.role;
+  const payload = decodeJwtPayload(token);
+  const role = payload?.role;
 
-    if (role !== "ADMIN") {
-      const url = req.nextUrl.clone();
-      url.pathname = "/dashboard";
-      return NextResponse.redirect(url);
-    }
+  if (pathname.startsWith("/admin") && role !== "ADMIN") {
+    const url = req.nextUrl.clone();
+    url.pathname = "/dashboard";
+    return NextResponse.redirect(url);
+  }
+
+  if (
+    pathname.startsWith("/manager") &&
+    role !== "MANAGER" &&
+    role !== "ADMIN"
+  ) {
+    const url = req.nextUrl.clone();
+    url.pathname = "/dashboard";
+    return NextResponse.redirect(url);
+  }
+
+  if (pathname.startsWith("/logs") && role !== "ADMIN") {
+    const url = req.nextUrl.clone();
+    url.pathname = "/dashboard";
+    return NextResponse.redirect(url);
   }
 
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/admin/:path*", "/content/:path*"],
+  matcher: [
+    "/dashboard/:path*",
+    "/admin/:path*",
+    "/manager/:path*",
+    "/logs/:path*",
+    "/content/:path*",
+  ],
 };

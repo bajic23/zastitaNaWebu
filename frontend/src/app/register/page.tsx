@@ -44,18 +44,21 @@ export default function RegisterPage() {
     setLoading(true);
 
     try {
-      const res = await fetch("http://localhost:5000/api/auth/register", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/auth/register`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            name,
+            email,
+            password,
+          }),
         },
-        body: JSON.stringify({
-          name,
-          email,
-          password,
-        }),
-      });
-
+      );
       const data = await res.json();
 
       if (!res.ok) {

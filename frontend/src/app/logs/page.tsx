@@ -69,7 +69,7 @@ export default function LogsPage() {
       try {
         const meRes = await fetch("http://localhost:5000/api/auth/me", {
           headers: {
-            Authorization: `Bearer ${token}`,
+            credentials: "include",
           },
         });
 
@@ -91,7 +91,7 @@ export default function LogsPage() {
           "http://localhost:5000/api/admin/access-logs",
           {
             headers: {
-              Authorization: `Bearer ${token}`,
+              credentials: "include",
             },
           },
         );

@@ -29,6 +29,6 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
     "**/*.mts"
-  ],
+, "src/app/travels/[slug]/[slug]"  ],
   "exclude": ["node_modules"]
 }

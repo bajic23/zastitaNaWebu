@@ -8,7 +8,7 @@ type UserItem = {
   id?: string;
   name?: string;
   email: string;
-  role: "USER" | "MANAGER" | "ADMIN";
+  role: "PUTNIK" | "OPERATOR";
   emailVerified: boolean;
   lastLoginAt?: string | null;
   createdAt?: string;
@@ -19,7 +19,7 @@ type MeResponse = {
     id: string;
     name?: string;
     email: string;
-    role: "USER" | "MANAGER" | "ADMIN";
+    role: "PUTNIK" | "OPERATOR";
     emailVerified: boolean;
     hasGoogleAccount?: boolean;
   };
@@ -68,7 +68,7 @@ export default function AdminPage() {
       try {
         const meRes = await fetch("http://localhost:5000/api/auth/me", {
           headers: {
-            Authorization: `Bearer ${token}`,
+            credentials: "include",
           },
         });
 
@@ -88,7 +88,7 @@ export default function AdminPage() {
 
         const usersRes = await fetch("http://localhost:5000/api/admin/users", {
           headers: {
-            Authorization: `Bearer ${token}`,
+            credentials: "include",
           },
         });
 
@@ -112,10 +112,7 @@ export default function AdminPage() {
     loadData();
   }, []);
 
-  async function updateRole(
-    userId: string,
-    role: "USER" | "MANAGER" | "ADMIN",
-  ) {
+  async function updateRole(userId: string, role: "PUTNIK" | "OPERATOR") {
     const token = getCookie("access_token");
 
     if (!token) {
@@ -133,7 +130,7 @@ export default function AdminPage() {
           method: "PATCH",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
+            credentials: "include",
           },
           body: JSON.stringify({ role }),
         },
@@ -186,7 +183,7 @@ export default function AdminPage() {
         {
           method: "DELETE",
           headers: {
-            Authorization: `Bearer ${token}`,
+            credentials: "include",
           },
         },
       );
@@ -213,10 +210,7 @@ export default function AdminPage() {
     }
   }
 
-  function handleRoleChange(
-    userId: string,
-    newRole: "USER" | "MANAGER" | "ADMIN",
-  ) {
+  function handleRoleChange(userId: string, newRole: "PUTNIK" | "OPERATOR") {
     setUsers((prev) =>
       prev.map((user) =>
         (user._id || user.id) === userId ? { ...user, role: newRole } : user,
@@ -344,7 +338,7 @@ export default function AdminPage() {
                 {users.map((user) => {
                   const userId = user._id || user.id || "";
                   const isMe = userId === me.id;
-                  const isAdminUser = user.role === "ADMIN";
+                  const isAdminUser = user.role === "OPERATOR";
                   const canDelete = !isMe && !isAdminUser;
 
                   return (
@@ -363,11 +357,9 @@ export default function AdminPage() {
                       <td className="px-4 py-4 text-sm">
                         <span
                           className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                            user.role === "ADMIN"
+                            user.role === "OPERATOR"
                               ? "border border-purple-500/30 bg-purple-500/10 text-purple-200"
-                              : user.role === "MANAGER"
-                                ? "border border-amber-500/30 bg-amber-500/10 text-amber-200"
-                                : "border border-blue-500/30 bg-blue-500/10 text-blue-200"
+                              : "border border-blue-500/30 bg-blue-500/10 text-blue-200"
                           }`}
                         >
                           {user.role}
@@ -397,15 +389,11 @@ export default function AdminPage() {
                             onChange={(e) =>
                               handleRoleChange(
                                 userId,
-                                e.target.value as "USER" | "MANAGER" | "ADMIN",
+                                e.target.value as "PUTNIK" | "OPERATOR",
                               )
                             }
                             className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
-                          >
-                            <option value="USER">USER</option>
-                            <option value="MANAGER">MANAGER</option>
-                            <option value="ADMIN">ADMIN</option>
-                          </select>
+                          ></select>
 
                           <button
                             type="button"
