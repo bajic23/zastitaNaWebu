@@ -23,10 +23,9 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  const isProtected =
-    pathname.startsWith("/dashboard") ||
-    pathname.startsWith("/admin") ||
-    pathname.startsWith("/logs");
+  const isProfileRoute = pathname.startsWith("/profile");
+  const isAdminRoute = pathname.startsWith("/admin");
+  const isProtected = isProfileRoute || isAdminRoute;
 
   if (!isProtected) {
     return NextResponse.next();
@@ -44,15 +43,9 @@ export function middleware(req: NextRequest) {
   const payload = decodeJwtPayload(token);
   const role = payload?.role;
 
-  if (pathname.startsWith("/admin") && role !== "OPERATOR") {
+  if (isAdminRoute && role !== "OPERATOR") {
     const url = req.nextUrl.clone();
-    url.pathname = "/dashboard";
-    return NextResponse.redirect(url);
-  }
-
-  if (pathname.startsWith("/logs") && role !== "OPERATOR") {
-    const url = req.nextUrl.clone();
-    url.pathname = "/dashboard";
+    url.pathname = "/travels";
     return NextResponse.redirect(url);
   }
 
@@ -60,5 +53,5 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/admin/:path*", "/logs/:path*"],
+  matcher: ["/profile/:path*", "/admin/:path*"],
 };

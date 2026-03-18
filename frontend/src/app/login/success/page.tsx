@@ -17,7 +17,7 @@ export default function LoginSuccessPage() {
 
     localStorage.setItem("refreshToken", refreshToken);
 
-    router.replace("/dashboard");
+    router.replace("/travels");
     router.refresh();
   }, [router, searchParams]);
 

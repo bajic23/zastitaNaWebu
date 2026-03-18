@@ -36,6 +36,10 @@ export default function LoginPage() {
         return;
       }
 
+      if (data?.refreshToken) {
+        localStorage.setItem("refreshToken", data.refreshToken);
+      }
+
       router.replace(next);
       router.refresh();
     } catch {
@@ -114,6 +118,7 @@ export default function LoginPage() {
                   {loading ? "Prijava u toku..." : "Uloguj se"}
                 </button>
               </form>
+
               <button
                 type="button"
                 onClick={() => {
