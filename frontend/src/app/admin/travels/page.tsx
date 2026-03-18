@@ -49,10 +49,12 @@ type TravelsResponse = {
     limit: number;
     pages: number;
   };
+  message?: string;
 };
 
 type DestinationsResponse = {
   destinations: Destination[];
+  message?: string;
 };
 
 function formatDate(value?: string | null) {
@@ -72,7 +74,7 @@ function formatPrice(value: number) {
   }).format(value);
 }
 
-export default function DashboardPage() {
+export default function AdminTravelsPage() {
   const [me, setMe] = useState<MeResponse["user"] | null>(null);
   const [travels, setTravels] = useState<Travel[]>([]);
   const [destinations, setDestinations] = useState<Destination[]>([]);
@@ -81,6 +83,13 @@ export default function DashboardPage() {
   const [pageError, setPageError] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  const [creatingTravel, setCreatingTravel] = useState(false);
+  const [travelTitle, setTravelTitle] = useState("");
+  const [travelDescription, setTravelDescription] = useState("");
+  const [travelPrice, setTravelPrice] = useState("");
+  const [travelDestinationId, setTravelDestinationId] = useState("");
+  const [travelImageFile, setTravelImageFile] = useState<File | null>(null);
 
   const [editingTravelId, setEditingTravelId] = useState<string | null>(null);
   const [savingTravelId, setSavingTravelId] = useState<string | null>(null);
@@ -96,15 +105,15 @@ export default function DashboardPage() {
   async function loadTravels() {
     const res = await fetch(
       `${process.env.NEXT_PUBLIC_API_URL}/api/travels?limit=100&sort=newest`,
+      {
+        credentials: "include",
+      },
     );
 
     const data: TravelsResponse = await res.json();
 
     if (!res.ok) {
-      throw new Error(
-        (data as { message?: string })?.message ||
-          "Greška pri učitavanju putovanja.",
-      );
+      throw new Error(data?.message || "Greška pri učitavanju putovanja.");
     }
 
     setTravels(data.travels || []);
@@ -113,11 +122,15 @@ export default function DashboardPage() {
   async function loadDestinations() {
     const res = await fetch(
       `${process.env.NEXT_PUBLIC_API_URL}/api/destinations`,
+      {
+        credentials: "include",
+      },
     );
+
     const data: DestinationsResponse = await res.json();
 
     if (!res.ok) {
-      throw new Error("Greška pri učitavanju destinacija.");
+      throw new Error(data?.message || "Greška pri učitavanju destinacija.");
     }
 
     setDestinations(data.destinations || []);
@@ -191,6 +204,67 @@ export default function DashboardPage() {
     setEditDestinationId("");
     setEditImageFile(null);
     setEditCurrentImageUrl("");
+  }
+
+  async function handleCreateTravel(e: React.FormEvent) {
+    e.preventDefault();
+
+    setActionMsg(null);
+    setActionError(null);
+
+    if (
+      !travelTitle.trim() ||
+      !travelPrice.trim() ||
+      !travelDestinationId.trim()
+    ) {
+      setActionError("Naziv, cena i destinacija su obavezni.");
+      return;
+    }
+
+    setCreatingTravel(true);
+
+    try {
+      const formData = new FormData();
+      formData.append("title", travelTitle.trim());
+      formData.append("description", travelDescription.trim());
+      formData.append("price", travelPrice);
+      formData.append("destination", travelDestinationId);
+
+      if (travelImageFile) {
+        formData.append("image", travelImageFile);
+      }
+
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/travels`,
+        {
+          method: "POST",
+          credentials: "include",
+          body: formData,
+        },
+      );
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.message || "Kreiranje putovanja nije uspelo.");
+      }
+
+      setTravelTitle("");
+      setTravelDescription("");
+      setTravelPrice("");
+      setTravelDestinationId("");
+      setTravelImageFile(null);
+      setActionMsg("Putovanje je uspešno kreirano.");
+      await loadTravels();
+    } catch (err) {
+      setActionError(
+        err instanceof Error
+          ? err.message
+          : "Došlo je do greške pri kreiranju putovanja.",
+      );
+    } finally {
+      setCreatingTravel(false);
+    }
   }
 
   async function handleSaveTravel(travelId: string) {
@@ -329,11 +403,11 @@ export default function DashboardPage() {
                 Upravljanje ponudom
               </p>
               <h1 className="mt-3 text-3xl font-extrabold text-white">
-                Izmena i brisanje postojećih putovanja
+                Dodavanje, izmena i brisanje putovanja
               </h1>
               <p className="mt-2 max-w-3xl text-slate-300">
-                Operator može da pregleda sva putovanja, izmeni podatke, promeni
-                destinaciju, zameni naslovnu sliku i obriše ponudu.
+                Operator može da kreira nova putovanja, izmeni podatke, promeni
+                destinaciju, zameni naslovnu sliku i obriše postojeću ponudu.
               </p>
             </div>
 
@@ -342,14 +416,28 @@ export default function DashboardPage() {
                 href="/travels"
                 className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 font-medium text-slate-200 transition hover:bg-slate-700"
               >
-                Ponuda
+                Javna putovanja
               </Link>
 
               <Link
                 href="/admin"
                 className="rounded-xl border border-purple-500/30 bg-purple-500/10 px-4 py-3 font-medium text-purple-200 transition hover:bg-purple-500/20"
               >
-                Operator panel
+                Admin panel
+              </Link>
+
+              <Link
+                href="/admin/destinations"
+                className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 font-medium text-cyan-200 transition hover:bg-cyan-500/20"
+              >
+                Destinacije
+              </Link>
+
+              <Link
+                href="/admin/logs"
+                className="rounded-xl border border-indigo-500/30 bg-indigo-500/10 px-4 py-3 font-medium text-indigo-200 transition hover:bg-indigo-500/20"
+              >
+                Logovi
               </Link>
             </div>
           </div>
@@ -376,6 +464,104 @@ export default function DashboardPage() {
           </div>
         ) : null}
 
+        <section className="mb-6 rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-lg">
+          <div className="mb-5">
+            <h2 className="text-xl font-bold text-white">
+              Dodaj novo putovanje
+            </h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Putovanje mora imati naziv, cenu i povezanu destinaciju.
+            </p>
+          </div>
+
+          <form onSubmit={handleCreateTravel} className="space-y-4">
+            <div>
+              <label className="mb-2 block text-sm font-medium text-slate-300">
+                Naziv putovanja
+              </label>
+              <input
+                value={travelTitle}
+                onChange={(e) => setTravelTitle(e.target.value)}
+                placeholder="Pariz vikend"
+                className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-white outline-none transition placeholder:text-slate-500 focus:border-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium text-slate-300">
+                Opis
+              </label>
+              <textarea
+                value={travelDescription}
+                onChange={(e) => setTravelDescription(e.target.value)}
+                placeholder="Opis putovanja"
+                rows={4}
+                className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-white outline-none transition placeholder:text-slate-500 focus:border-blue-500"
+              />
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-300">
+                  Cena
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={travelPrice}
+                  onChange={(e) => setTravelPrice(e.target.value)}
+                  placeholder="10000"
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-white outline-none transition placeholder:text-slate-500 focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-300">
+                  Destinacija
+                </label>
+                <select
+                  value={travelDestinationId}
+                  onChange={(e) => setTravelDestinationId(e.target.value)}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-white outline-none transition focus:border-blue-500"
+                >
+                  <option value="">Izaberi destinaciju</option>
+                  {sortedDestinations.map((destination) => (
+                    <option key={destination._id} value={destination._id}>
+                      {destination.name} ({destination.country})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium text-slate-300">
+                Naslovna slika
+              </label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null;
+                  setTravelImageFile(file);
+                }}
+                className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-white outline-none transition file:mr-4 file:rounded-lg file:border-0 file:bg-blue-500/20 file:px-3 file:py-2 file:text-sm file:font-medium file:text-blue-200 hover:file:bg-blue-500/30"
+              />
+              <p className="mt-2 text-xs text-slate-500">
+                Dozvoljene su samo slike, maksimalno 5 MB.
+              </p>
+            </div>
+
+            <button
+              type="submit"
+              disabled={creatingTravel}
+              className="w-full rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-3 font-semibold text-blue-200 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {creatingTravel ? "Kreiranje..." : "Dodaj putovanje"}
+            </button>
+          </form>
+        </section>
+
         <section className="space-y-4">
           {travels.length === 0 ? (
             <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-lg">
@@ -383,7 +569,7 @@ export default function DashboardPage() {
                 Nema kreiranih putovanja
               </h2>
               <p className="mt-2 text-slate-300">
-                Prvo dodaj putovanje iz operator panela.
+                Dodaj prvo putovanje koristeći formu iznad.
               </p>
             </div>
           ) : (
