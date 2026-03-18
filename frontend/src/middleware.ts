@@ -26,13 +26,13 @@ export function middleware(req: NextRequest) {
   const isProtected =
     pathname.startsWith("/dashboard") ||
     pathname.startsWith("/admin") ||
-    pathname.startsWith("/manager") ||
-    pathname.startsWith("/logs") ||
-    pathname.startsWith("/content");
+    pathname.startsWith("/logs");
 
-  if (!isProtected) return NextResponse.next();
+  if (!isProtected) {
+    return NextResponse.next();
+  }
 
-  const token = req.cookies.get("access_token")?.value;
+  const token = req.cookies.get("accessToken")?.value;
 
   if (!token) {
     const url = req.nextUrl.clone();
@@ -44,23 +44,13 @@ export function middleware(req: NextRequest) {
   const payload = decodeJwtPayload(token);
   const role = payload?.role;
 
-  if (pathname.startsWith("/admin") && role !== "ADMIN") {
+  if (pathname.startsWith("/admin") && role !== "OPERATOR") {
     const url = req.nextUrl.clone();
     url.pathname = "/dashboard";
     return NextResponse.redirect(url);
   }
 
-  if (
-    pathname.startsWith("/manager") &&
-    role !== "MANAGER" &&
-    role !== "ADMIN"
-  ) {
-    const url = req.nextUrl.clone();
-    url.pathname = "/dashboard";
-    return NextResponse.redirect(url);
-  }
-
-  if (pathname.startsWith("/logs") && role !== "ADMIN") {
+  if (pathname.startsWith("/logs") && role !== "OPERATOR") {
     const url = req.nextUrl.clone();
     url.pathname = "/dashboard";
     return NextResponse.redirect(url);
@@ -70,11 +60,5 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: [
-    "/dashboard/:path*",
-    "/admin/:path*",
-    "/manager/:path*",
-    "/logs/:path*",
-    "/content/:path*",
-  ],
+  matcher: ["/dashboard/:path*", "/admin/:path*", "/logs/:path*"],
 };

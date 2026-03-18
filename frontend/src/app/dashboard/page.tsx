@@ -5,12 +5,6 @@ import { useEffect, useMemo, useState } from "react";
 
 type UserRole = "PUTNIK" | "OPERATOR";
 
-type LoginHistoryItem = {
-  at?: string;
-  ip?: string;
-  userAgent?: string;
-};
-
 type MeResponse = {
   user: {
     id: string;
@@ -18,10 +12,47 @@ type MeResponse = {
     email: string;
     role: UserRole;
     emailVerified: boolean;
-    lastLoginAt?: string | null;
-    loginHistory?: LoginHistoryItem[];
-    hasGoogleAccount?: boolean;
   };
+};
+
+type Destination = {
+  _id: string;
+  name: string;
+  country: string;
+  description?: string;
+};
+
+type Travel = {
+  _id: string;
+  title: string;
+  slug: string;
+  description?: string;
+  price: number;
+  imageUrl?: string;
+  destination:
+    | Destination
+    | {
+        _id: string;
+        name: string;
+        country: string;
+        description?: string;
+      };
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+type TravelsResponse = {
+  travels: Travel[];
+  pagination?: {
+    total: number;
+    page: number;
+    limit: number;
+    pages: number;
+  };
+};
+
+type DestinationsResponse = {
+  destinations: Destination[];
 };
 
 function formatDate(value?: string | null) {
@@ -33,41 +64,93 @@ function formatDate(value?: string | null) {
   return date.toLocaleString("sr-RS");
 }
 
-export default function DashboardPage() {
-  const [user, setUser] = useState<MeResponse["user"] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+function formatPrice(value: number) {
+  return new Intl.NumberFormat("sr-RS", {
+    style: "currency",
+    currency: "RSD",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
 
-  const [isEditing, setIsEditing] = useState(false);
-  const [editName, setEditName] = useState("");
-  const [editEmail, setEditEmail] = useState("");
-  const [profileMsg, setProfileMsg] = useState<string | null>(null);
-  const [profileError, setProfileError] = useState<string | null>(null);
-  const [savingProfile, setSavingProfile] = useState(false);
-  const [deletingProfile, setDeletingProfile] = useState(false);
+export default function DashboardPage() {
+  const [me, setMe] = useState<MeResponse["user"] | null>(null);
+  const [travels, setTravels] = useState<Travel[]>([]);
+  const [destinations, setDestinations] = useState<Destination[]>([]);
+
+  const [loading, setLoading] = useState(true);
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const [editingTravelId, setEditingTravelId] = useState<string | null>(null);
+  const [savingTravelId, setSavingTravelId] = useState<string | null>(null);
+  const [deletingTravelId, setDeletingTravelId] = useState<string | null>(null);
+
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editPrice, setEditPrice] = useState("");
+  const [editDestinationId, setEditDestinationId] = useState("");
+  const [editImageFile, setEditImageFile] = useState<File | null>(null);
+  const [editCurrentImageUrl, setEditCurrentImageUrl] = useState("");
+
+  async function loadTravels() {
+    const res = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/api/travels?limit=100&sort=newest`,
+    );
+
+    const data: TravelsResponse = await res.json();
+
+    if (!res.ok) {
+      throw new Error(
+        (data as { message?: string })?.message ||
+          "Greška pri učitavanju putovanja.",
+      );
+    }
+
+    setTravels(data.travels || []);
+  }
+
+  async function loadDestinations() {
+    const res = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/api/destinations`,
+    );
+    const data: DestinationsResponse = await res.json();
+
+    if (!res.ok) {
+      throw new Error("Greška pri učitavanju destinacija.");
+    }
+
+    setDestinations(data.destinations || []);
+  }
 
   useEffect(() => {
-    async function loadMe() {
+    async function loadData() {
       try {
-        const res = await fetch(
+        const meRes = await fetch(
           `${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`,
           {
             credentials: "include",
           },
         );
 
-        const data = await res.json();
+        const meData = await meRes.json();
 
-        if (!res.ok) {
-          throw new Error(data?.message || "Greška pri učitavanju korisnika.");
+        if (!meRes.ok) {
+          throw new Error(
+            meData?.message || "Greška pri učitavanju korisnika.",
+          );
         }
 
-        setUser(data.user);
-        setEditName(data.user.name || "");
-        setEditEmail(data.user.email || "");
-        setError(null);
+        if (meData.user.role !== "OPERATOR") {
+          throw new Error("Nemate pristup upravljanju ponudom.");
+        }
+
+        setMe(meData.user);
+
+        await Promise.all([loadTravels(), loadDestinations()]);
+        setPageError(null);
       } catch (err) {
-        setError(
+        setPageError(
           err instanceof Error ? err.message : "Došlo je do nepoznate greške.",
         );
       } finally {
@@ -75,139 +158,160 @@ export default function DashboardPage() {
       }
     }
 
-    loadMe();
+    loadData();
   }, []);
 
-  const authMethod = useMemo(() => {
-    if (!user) return "-";
-    return user.hasGoogleAccount ? "Google OAuth" : "Email + password";
-  }, [user]);
+  const sortedDestinations = useMemo(
+    () => [...destinations].sort((a, b) => a.name.localeCompare(b.name)),
+    [destinations],
+  );
 
-  const roleText = useMemo(() => {
-    if (!user) return "";
+  function startEditing(travel: Travel) {
+    const destinationId =
+      typeof travel.destination === "object" && travel.destination?._id
+        ? travel.destination._id
+        : "";
 
-    if (user.role === "OPERATOR") {
-      return "Operator upravlja putnicima, destinacijama, putovanjima i pristupnim logovima.";
-    }
+    setEditingTravelId(travel._id);
+    setEditTitle(travel.title || "");
+    setEditDescription(travel.description || "");
+    setEditPrice(String(travel.price ?? ""));
+    setEditDestinationId(destinationId);
+    setEditImageFile(null);
+    setEditCurrentImageUrl(travel.imageUrl || "");
+    setActionMsg(null);
+    setActionError(null);
+  }
 
-    return "Putnik ima pristup svom profilu i javnom pregledu putovanja.";
-  }, [user]);
+  function cancelEditing() {
+    setEditingTravelId(null);
+    setEditTitle("");
+    setEditDescription("");
+    setEditPrice("");
+    setEditDestinationId("");
+    setEditImageFile(null);
+    setEditCurrentImageUrl("");
+  }
 
-  const activityItems = useMemo(() => {
-    if (!user?.loginHistory?.length) return [];
-    return user.loginHistory.slice(-3).reverse();
-  }, [user]);
+  async function handleSaveTravel(travelId: string) {
+    setActionMsg(null);
+    setActionError(null);
 
-  async function handleProfileSave() {
-    if (!editName.trim() || !editEmail.trim()) {
-      setProfileError("Ime i email su obavezni.");
+    if (!editTitle.trim() || !editPrice.trim() || !editDestinationId.trim()) {
+      setActionError("Naziv, cena i destinacija su obavezni.");
       return;
     }
 
-    setSavingProfile(true);
-    setProfileError(null);
-    setProfileMsg(null);
+    setSavingTravelId(travelId);
 
     try {
+      const formData = new FormData();
+      formData.append("title", editTitle.trim());
+      formData.append("description", editDescription.trim());
+      formData.append("price", editPrice);
+      formData.append("destination", editDestinationId);
+
+      if (editImageFile) {
+        formData.append("image", editImageFile);
+      }
+
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`,
+        `${process.env.NEXT_PUBLIC_API_URL}/api/travels/${travelId}`,
         {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          method: "PUT",
           credentials: "include",
-          body: JSON.stringify({
-            name: editName.trim(),
-            email: editEmail.trim(),
-          }),
+          body: formData,
         },
       );
 
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data?.message || "Izmena profila nije uspela.");
+        throw new Error(data?.message || "Izmena putovanja nije uspela.");
       }
 
-      setUser(data.user);
-      setEditName(data.user.name || "");
-      setEditEmail(data.user.email || "");
-      setIsEditing(false);
-      setProfileMsg("Profil je uspešno ažuriran.");
+      setActionMsg("Putovanje je uspešno ažurirano.");
+      cancelEditing();
+      await loadTravels();
     } catch (err) {
-      setProfileError(
-        err instanceof Error ? err.message : "Došlo je do greške pri čuvanju.",
+      setActionError(
+        err instanceof Error
+          ? err.message
+          : "Došlo je do greške pri izmeni putovanja.",
       );
     } finally {
-      setSavingProfile(false);
+      setSavingTravelId(null);
     }
   }
 
-  async function handleDeleteProfile() {
+  async function handleDeleteTravel(travelId: string) {
     const confirmed = window.confirm(
-      "Da li sigurno želiš da obrišeš svoj profil? Ova akcija je nepovratna.",
+      "Da li si siguran da želiš da obrišeš ovo putovanje?",
     );
 
     if (!confirmed) return;
 
-    setDeletingProfile(true);
-    setProfileError(null);
-    setProfileMsg(null);
+    setActionMsg(null);
+    setActionError(null);
+    setDeletingTravelId(travelId);
 
     try {
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`,
+        `${process.env.NEXT_PUBLIC_API_URL}/api/travels/${travelId}`,
         {
           method: "DELETE",
           credentials: "include",
         },
       );
 
-      const data = await res.json().catch(() => null);
+      const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data?.message || "Brisanje profila nije uspelo.");
+        throw new Error(data?.message || "Brisanje putovanja nije uspelo.");
       }
 
-      localStorage.removeItem("refreshToken");
-      window.location.href = "/login";
+      if (editingTravelId === travelId) {
+        cancelEditing();
+      }
+
+      setActionMsg("Putovanje je uspešno obrisano.");
+      setTravels((prev) => prev.filter((item) => item._id !== travelId));
     } catch (err) {
-      setProfileError(
+      setActionError(
         err instanceof Error
           ? err.message
-          : "Došlo je do greške pri brisanju profila.",
+          : "Došlo je do greške pri brisanju putovanja.",
       );
     } finally {
-      setDeletingProfile(false);
+      setDeletingTravelId(null);
     }
   }
 
   if (loading) {
     return (
       <main className="min-h-screen bg-slate-950 px-4 py-8 text-slate-100">
-        <div className="mx-auto max-w-6xl rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-lg">
-          <p className="text-slate-300">Učitavanje dashboard-a...</p>
+        <div className="mx-auto max-w-7xl rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-lg">
+          Učitavanje upravljanja ponudom...
         </div>
       </main>
     );
   }
 
-  if (error || !user) {
+  if (pageError || !me) {
     return (
       <main className="min-h-screen bg-slate-950 px-4 py-8 text-slate-100">
         <div className="mx-auto max-w-4xl rounded-2xl border border-red-500/20 bg-red-500/10 p-6 shadow-lg">
-          <h1 className="text-2xl font-bold text-white">Greška</h1>
+          <h1 className="text-2xl font-bold text-white">Pristup odbijen</h1>
           <p className="mt-2 text-red-200">
-            {error || "Korisnik nije pronađen."}
+            {pageError || "Nemate pristup ovoj stranici."}
           </p>
 
           <div className="mt-4">
             <Link
-              href="/login"
+              href="/travels"
               className="inline-block rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 font-medium text-slate-200 transition hover:bg-slate-700"
             >
-              Idi na login
+              Nazad na ponudu
             </Link>
           </div>
         </div>
@@ -217,302 +321,308 @@ export default function DashboardPage() {
 
   return (
     <main className="min-h-screen bg-slate-950 px-4 py-8 text-slate-100">
-      <div className="mx-auto max-w-6xl">
-        <header className="mb-6 flex flex-col gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5 shadow-lg backdrop-blur md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-white">ZaštitaNaWebu</h1>
-            <p className="text-sm text-slate-400">Korisnički dashboard</p>
-          </div>
-
-          <div className="text-left md:text-right">
-            <p className="text-sm font-semibold text-white">
-              {user.name || user.email}
-            </p>
-            <p className="text-sm text-slate-400">Rola: {user.role}</p>
-          </div>
-        </header>
-
+      <div className="mx-auto max-w-7xl">
         <section className="mb-6 rounded-3xl border border-blue-500/20 bg-linear-to-br from-blue-600/20 to-slate-900 p-6 shadow-xl">
-          <h2 className="mb-3 text-3xl font-extrabold text-white">
-            {user.role === "OPERATOR"
-              ? "Dobrodošao na operator dashboard"
-              : "Dobrodošao na svoj dashboard"}
-          </h2>
-
-          <p className="max-w-3xl text-slate-300">{roleText}</p>
-
-          <div className="mt-5 flex flex-wrap gap-3">
-            <span
-              className={`rounded-full border px-3 py-1 text-sm font-medium ${
-                user.emailVerified
-                  ? "border-green-500/30 bg-green-500/10 text-green-300"
-                  : "border-amber-500/30 bg-amber-500/10 text-amber-300"
-              }`}
-            >
-              {user.emailVerified
-                ? "Email verifikovan"
-                : "Email nije verifikovan"}
-            </span>
-
-            <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-sm font-medium text-blue-300">
-              {authMethod}
-            </span>
-
-            <span className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-sm font-medium text-slate-200">
-              Protected route
-            </span>
-          </div>
-        </section>
-
-        <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-lg">
-            <p className="text-sm text-slate-400">Rola</p>
-            <p className="mt-2 text-2xl font-bold text-white">{user.role}</p>
-            <p className="mt-2 text-sm text-slate-300">{roleText}</p>
-          </div>
-
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-lg">
-            <p className="text-sm text-slate-400">Status naloga</p>
-            <p className="mt-2 text-2xl font-bold text-white">
-              {user.emailVerified ? "Aktivan" : "Na čekanju"}
-            </p>
-            <p className="mt-2 text-sm text-slate-300">
-              {user.emailVerified
-                ? "Nalog je uspešno verifikovan."
-                : "Potrebna je verifikacija email adrese."}
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-lg">
-            <p className="text-sm text-slate-400">Način prijave</p>
-            <p className="mt-2 text-2xl font-bold text-white">{authMethod}</p>
-            <p className="mt-2 text-sm text-slate-300">
-              Prikaz aktivnog auth mehanizma korisnika.
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-lg">
-            <p className="text-sm text-slate-400">Poslednja prijava</p>
-            <p className="mt-2 text-lg font-bold text-white">
-              {formatDate(user.lastLoginAt)}
-            </p>
-            <p className="mt-2 text-sm text-slate-300">
-              Poslednja zabeležena aktivnost korisnika.
-            </p>
-          </div>
-        </section>
-
-        <section className="grid gap-4 lg:grid-cols-3">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-lg lg:col-span-2">
-            <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <h3 className="text-xl font-bold text-white">Pregled profila</h3>
-
-              {!isEditing ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setProfileMsg(null);
-                    setProfileError(null);
-                    setEditName(user.name || "");
-                    setEditEmail(user.email || "");
-                    setIsEditing(true);
-                  }}
-                  className="rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-2 text-sm font-medium text-blue-200 transition hover:bg-blue-500/20"
-                >
-                  Izmeni profil
-                </button>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsEditing(false);
-                      setProfileMsg(null);
-                      setProfileError(null);
-                      setEditName(user.name || "");
-                      setEditEmail(user.email || "");
-                    }}
-                    className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-700"
-                  >
-                    Otkaži
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={savingProfile}
-                    onClick={handleProfileSave}
-                    className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {savingProfile ? "Čuvanje..." : "Sačuvaj"}
-                  </button>
-                </div>
-              )}
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div>
+              <p className="text-sm font-medium uppercase tracking-[0.2em] text-blue-300">
+                Upravljanje ponudom
+              </p>
+              <h1 className="mt-3 text-3xl font-extrabold text-white">
+                Izmena i brisanje postojećih putovanja
+              </h1>
+              <p className="mt-2 max-w-3xl text-slate-300">
+                Operator može da pregleda sva putovanja, izmeni podatke, promeni
+                destinaciju, zameni naslovnu sliku i obriše ponudu.
+              </p>
             </div>
 
-            {profileMsg ? (
-              <div className="mb-4 rounded-xl border border-green-500/20 bg-green-500/10 px-4 py-3 text-sm text-green-200">
-                {profileMsg}
-              </div>
-            ) : null}
-
-            {profileError ? (
-              <div className="mb-4 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-                {profileError}
-              </div>
-            ) : null}
-
-            <div className="space-y-4">
-              <div className="flex flex-col gap-2 border-b border-slate-800 pb-3 md:flex-row md:items-center md:justify-between">
-                <span className="text-sm text-slate-400">Ime</span>
-
-                {isEditing ? (
-                  <input
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-white outline-none transition focus:border-blue-500 md:w-80"
-                  />
-                ) : (
-                  <span className="text-sm font-semibold text-white">
-                    {user.name || "Nema imena"}
-                  </span>
-                )}
-              </div>
-
-              <div className="flex flex-col gap-2 border-b border-slate-800 pb-3 md:flex-row md:items-center md:justify-between">
-                <span className="text-sm text-slate-400">Email</span>
-
-                {isEditing ? (
-                  <input
-                    type="email"
-                    value={editEmail}
-                    onChange={(e) => setEditEmail(e.target.value)}
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-white outline-none transition focus:border-blue-500 md:w-80"
-                  />
-                ) : (
-                  <span className="text-sm font-semibold text-white">
-                    {user.email}
-                  </span>
-                )}
-              </div>
-
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <span className="text-sm text-slate-400">Rola</span>
-                <span className="text-sm font-semibold text-white">
-                  {user.role}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <span className="text-sm text-slate-400">Email status</span>
-                <span
-                  className={`text-sm font-semibold ${
-                    user.emailVerified ? "text-emerald-300" : "text-amber-300"
-                  }`}
-                >
-                  {user.emailVerified ? "Verified" : "Not verified"}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <span className="text-sm text-slate-400">Način prijave</span>
-                <span className="text-sm font-semibold text-white">
-                  {authMethod}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-400">Poslednji login</span>
-                <span className="text-sm font-semibold text-white">
-                  {formatDate(user.lastLoginAt)}
-                </span>
-              </div>
-            </div>
-
-            <div className="mt-6">
-              <div className="mb-3 flex items-center justify-between">
-                <h4 className="text-base font-semibold text-white">
-                  Poslednje prijave
-                </h4>
-              </div>
-
-              <div className="space-y-3">
-                {activityItems.length > 0 ? (
-                  activityItems.map((item, index) => (
-                    <div
-                      key={`${item.at || "login"}-${index}`}
-                      className="rounded-xl border border-slate-800 bg-slate-950/50 p-4"
-                    >
-                      <p className="text-sm font-semibold text-white">
-                        Uspešna prijava na sistem
-                      </p>
-                      <p className="mt-1 text-sm text-slate-400">
-                        {formatDate(item.at)}
-                      </p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        IP: {item.ip || "Nema podatka"}
-                      </p>
-                    </div>
-                  ))
-                ) : (
-                  <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
-                    <p className="text-sm font-semibold text-white">
-                      Nema istorije prijava
-                    </p>
-                    <p className="mt-1 text-sm text-slate-400">
-                      Login history još nije dostupna.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-lg">
-            <h3 className="mb-5 text-xl font-bold text-white">Brze akcije</h3>
-
-            <div className="space-y-3">
+            <div className="flex flex-wrap gap-3">
               <Link
                 href="/travels"
-                className="block rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-3 text-center font-medium text-blue-200 transition hover:bg-blue-500/20"
+                className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 font-medium text-slate-200 transition hover:bg-slate-700"
               >
-                Pregled svih putovanja
+                Ponuda
               </Link>
 
-              {user.role === "OPERATOR" ? (
-                <>
-                  <Link
-                    href="/admin"
-                    className="block rounded-xl border border-purple-500/30 bg-purple-500/10 px-4 py-3 text-center font-medium text-purple-200 transition hover:bg-purple-500/20"
-                  >
-                    Upravljanje putnicima
-                  </Link>
-
-                  <Link
-                    href="/logs"
-                    className="block rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-center font-medium text-amber-200 transition hover:bg-amber-500/20"
-                  >
-                    Pristupni logovi
-                  </Link>
-                </>
-              ) : null}
-
-              <button
-                type="button"
-                onClick={handleDeleteProfile}
-                disabled={deletingProfile}
-                className="w-full rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-center font-medium text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {deletingProfile ? "Brisanje profila..." : "Obriši moj profil"}
-              </button>
-
               <Link
-                href="/logout"
-                className="block rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-center font-medium text-slate-200 transition hover:bg-slate-700"
+                href="/admin"
+                className="rounded-xl border border-purple-500/30 bg-purple-500/10 px-4 py-3 font-medium text-purple-200 transition hover:bg-purple-500/20"
               >
-                Logout
+                Operator panel
               </Link>
             </div>
           </div>
+
+          <div className="mt-5 flex flex-wrap gap-3">
+            <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-sm font-medium text-blue-200">
+              OPERATOR pristup
+            </span>
+            <span className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-sm font-medium text-slate-200">
+              Ukupno putovanja: {travels.length}
+            </span>
+          </div>
+        </section>
+
+        {actionMsg ? (
+          <div className="mb-4 rounded-xl border border-green-500/20 bg-green-500/10 px-4 py-3 text-sm text-green-200">
+            {actionMsg}
+          </div>
+        ) : null}
+
+        {actionError ? (
+          <div className="mb-4 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+            {actionError}
+          </div>
+        ) : null}
+
+        <section className="space-y-4">
+          {travels.length === 0 ? (
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-lg">
+              <h2 className="text-xl font-bold text-white">
+                Nema kreiranih putovanja
+              </h2>
+              <p className="mt-2 text-slate-300">
+                Prvo dodaj putovanje iz operator panela.
+              </p>
+            </div>
+          ) : (
+            travels.map((travel) => {
+              const isEditing = editingTravelId === travel._id;
+              const imageSrc = travel.imageUrl
+                ? `${process.env.NEXT_PUBLIC_API_URL}${travel.imageUrl}`
+                : null;
+
+              const destinationName =
+                typeof travel.destination === "object"
+                  ? travel.destination?.name
+                  : "Nepoznata destinacija";
+
+              const destinationCountry =
+                typeof travel.destination === "object"
+                  ? travel.destination?.country
+                  : "Nema države";
+
+              return (
+                <article
+                  key={travel._id}
+                  className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-lg"
+                >
+                  <div className="space-y-5">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <h2 className="text-2xl font-bold text-white">
+                          {travel.title}
+                        </h2>
+                        <p className="mt-1 text-sm text-slate-400">
+                          Upravljanje postojećom ponudom.
+                        </p>
+                      </div>
+
+                      {!isEditing ? (
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => startEditing(travel)}
+                            className="rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-2 text-sm font-medium text-blue-200 transition hover:bg-blue-500/20"
+                          >
+                            Izmeni
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={deletingTravelId === travel._id}
+                            onClick={() => handleDeleteTravel(travel._id)}
+                            className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-200 transition hover:bg-red-500/20 disabled:opacity-60"
+                          >
+                            {deletingTravelId === travel._id
+                              ? "Brisanje..."
+                              : "Obriši"}
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={cancelEditing}
+                            className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm text-slate-200"
+                          >
+                            Otkaži
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={savingTravelId === travel._id}
+                            onClick={() => handleSaveTravel(travel._id)}
+                            className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-200"
+                          >
+                            {savingTravelId === travel._id
+                              ? "Čuvanje..."
+                              : "Sačuvaj izmene"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid gap-5 md:grid-cols-[420px_minmax(0,1fr)]">
+                      <div className="h-64 overflow-hidden rounded-2xl border border-slate-800 bg-slate-950/50">
+                        {imageSrc ? (
+                          <img
+                            src={imageSrc}
+                            alt={travel.title}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-sm text-slate-500">
+                            Nema slike
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="h-64 rounded-2xl border border-slate-800 bg-slate-950/50 p-5">
+                        <div className="grid h-full content-start gap-4">
+                          <div>
+                            <p className="text-sm text-slate-400">Slug</p>
+                            <p className="text-sm font-semibold text-white">
+                              {travel.slug}
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-sm text-slate-400">
+                              Destinacija
+                            </p>
+                            <p className="text-sm font-semibold text-white">
+                              {destinationName} ({destinationCountry})
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-sm text-slate-400">Cena</p>
+                            <p className="text-xl font-bold text-white">
+                              {formatPrice(travel.price)}
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-sm text-slate-400">
+                              Poslednja izmena
+                            </p>
+                            <p className="text-sm text-slate-300">
+                              {formatDate(travel.updatedAt)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {!isEditing ? (
+                      <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-5">
+                        <p className="mb-2 text-sm text-slate-400">
+                          Opis putovanja
+                        </p>
+                        <p className="text-slate-200">
+                          {travel.description || "Opis nije dostupan."}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4 rounded-2xl border border-slate-800 bg-slate-950/50 p-5">
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-slate-300">
+                            Naziv putovanja
+                          </label>
+                          <input
+                            value={editTitle}
+                            onChange={(e) => setEditTitle(e.target.value)}
+                            className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-blue-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-slate-300">
+                            Opis
+                          </label>
+                          <textarea
+                            value={editDescription}
+                            onChange={(e) => setEditDescription(e.target.value)}
+                            rows={5}
+                            className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-blue-500"
+                          />
+                        </div>
+
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <div>
+                            <label className="mb-2 block text-sm font-medium text-slate-300">
+                              Cena
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={editPrice}
+                              onChange={(e) => setEditPrice(e.target.value)}
+                              className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-blue-500"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="mb-2 block text-sm font-medium text-slate-300">
+                              Destinacija
+                            </label>
+                            <select
+                              value={editDestinationId}
+                              onChange={(e) =>
+                                setEditDestinationId(e.target.value)
+                              }
+                              className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-blue-500"
+                            >
+                              <option value="">Izaberi destinaciju</option>
+                              {sortedDestinations.map((destination) => (
+                                <option
+                                  key={destination._id}
+                                  value={destination._id}
+                                >
+                                  {destination.name} ({destination.country})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-slate-300">
+                            Nova naslovna slika
+                          </label>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0] || null;
+                              setEditImageFile(file);
+                            }}
+                            className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none transition file:mr-4 file:rounded-lg file:border-0 file:bg-blue-500/20 file:px-3 file:py-2 file:text-sm file:font-medium file:text-blue-200 hover:file:bg-blue-500/30"
+                          />
+                          <p className="mt-2 text-xs text-slate-500">
+                            Opciono. Ako ne izabereš novu sliku, ostaje
+                            postojeća.
+                          </p>
+                        </div>
+
+                        {editImageFile ? (
+                          <p className="text-sm text-slate-400">
+                            Izabrana slika: {editImageFile.name}
+                          </p>
+                        ) : editCurrentImageUrl ? (
+                          <p className="text-sm text-slate-400">
+                            Trenutna slika je zadržana.
+                          </p>
+                        ) : null}
+                      </div>
+                    )}
+                  </div>
+                </article>
+              );
+            })
+          )}
         </section>
       </div>
     </main>

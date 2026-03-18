@@ -173,10 +173,17 @@ export default function TravelsPage() {
 
             <div className="flex flex-wrap gap-3">
               <Link
-                href="/dashboard"
+                href="/login"
                 className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 font-medium text-slate-200 transition hover:bg-slate-700"
               >
-                Dashboard
+                Login
+              </Link>
+
+              <Link
+                href="/register"
+                className="rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-3 font-medium text-blue-200 transition hover:bg-blue-500/20"
+              >
+                Registruj se
               </Link>
             </div>
           </div>

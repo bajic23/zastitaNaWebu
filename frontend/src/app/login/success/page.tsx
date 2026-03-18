@@ -8,21 +8,22 @@ export default function LoginSuccessPage() {
   const searchParams = useSearchParams();
 
   useEffect(() => {
-    const token = searchParams.get("token");
     const refreshToken = searchParams.get("refreshToken");
 
-    if (!token || !refreshToken) {
+    if (!refreshToken) {
       router.replace("/login?error=missing_google_tokens");
       return;
     }
 
-    localStorage.setItem("token", token);
     localStorage.setItem("refreshToken", refreshToken);
 
-    document.cookie = `access_token=${token}; path=/; samesite=lax`;
-
     router.replace("/dashboard");
+    router.refresh();
   }, [router, searchParams]);
 
-  return <p>Prijava u toku...</p>;
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-100">
+      <p className="text-sm text-slate-300">Prijava u toku...</p>
+    </main>
+  );
 }

@@ -207,8 +207,8 @@ router.put(
       travel.destination = destination;
       if (req.file) {
         travel.imageUrl = `/uploads/${req.file.filename}`;
-      } else {
-        travel.imageUrl = String(imageUrl || "").trim();
+      } else if (imageUrl !== undefined && String(imageUrl).trim()) {
+        travel.imageUrl = String(imageUrl).trim();
       }
 
       await travel.save();
