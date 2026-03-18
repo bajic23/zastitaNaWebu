@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 export default function LoginPage() {
   const router = useRouter();
   const search = useSearchParams();
-  const next = search.get("next") || "/dashboard";
+  const next = search.get("next") || "/travels";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

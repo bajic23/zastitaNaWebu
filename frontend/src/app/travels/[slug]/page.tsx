@@ -4,6 +4,18 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+type UserRole = "PUTNIK" | "OPERATOR";
+
+type MeResponse = {
+  user?: {
+    id: string;
+    name?: string;
+    email: string;
+    role: UserRole;
+    emailVerified: boolean;
+  };
+};
+
 type Destination = {
   _id: string;
   name: string;
@@ -15,7 +27,7 @@ type CreatedBy = {
   _id: string;
   name?: string;
   email?: string;
-  role?: "PUTNIK" | "OPERATOR";
+  role?: UserRole;
 };
 
 type Travel = {
@@ -33,6 +45,7 @@ type Travel = {
 
 type TravelResponse = {
   travel: Travel;
+  message?: string;
 };
 
 function formatPrice(value: number) {
@@ -57,6 +70,7 @@ export default function TravelDetailsPage() {
   const slug = String(params.slug || "");
 
   const [travel, setTravel] = useState<Travel | null>(null);
+  const [me, setMe] = useState<MeResponse["user"] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,10 +84,7 @@ export default function TravelDetailsPage() {
         const data: TravelResponse = await res.json();
 
         if (!res.ok) {
-          throw new Error(
-            (data as unknown as { message?: string })?.message ||
-              "Greška pri učitavanju putovanja.",
-          );
+          throw new Error(data?.message || "Greška pri učitavanju putovanja.");
         }
 
         setTravel(data.travel);
@@ -89,8 +100,30 @@ export default function TravelDetailsPage() {
       }
     }
 
+    async function loadMe() {
+      try {
+        const res = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`,
+          {
+            credentials: "include",
+          },
+        );
+
+        if (!res.ok) {
+          setMe(null);
+          return;
+        }
+
+        const data: MeResponse = await res.json();
+        setMe(data.user || null);
+      } catch {
+        setMe(null);
+      }
+    }
+
     if (slug) {
       loadTravel();
+      loadMe();
     } else {
       setLoading(false);
       setError("Slug nije prosleđen.");
@@ -185,12 +218,41 @@ export default function TravelDetailsPage() {
                 Nazad na listu
               </Link>
 
-              <Link
-                href="/dashboard"
-                className="rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-3 font-medium text-blue-200 transition hover:bg-blue-500/20"
-              >
-                Dashboard
-              </Link>
+              {me ? (
+                <>
+                  <Link
+                    href="/profile"
+                    className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 font-medium text-emerald-200 transition hover:bg-emerald-500/20"
+                  >
+                    Profil
+                  </Link>
+
+                  {me.role === "OPERATOR" ? (
+                    <Link
+                      href="/admin"
+                      className="rounded-xl border border-purple-500/30 bg-purple-500/10 px-4 py-3 font-medium text-purple-200 transition hover:bg-purple-500/20"
+                    >
+                      Admin panel
+                    </Link>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <Link
+                    href="/login"
+                    className="rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-3 font-medium text-blue-200 transition hover:bg-blue-500/20"
+                  >
+                    Login
+                  </Link>
+
+                  <Link
+                    href="/register"
+                    className="rounded-xl border border-purple-500/30 bg-purple-500/10 px-4 py-3 font-medium text-purple-200 transition hover:bg-purple-500/20"
+                  >
+                    Register
+                  </Link>
+                </>
+              )}
             </div>
           </div>
         </section>

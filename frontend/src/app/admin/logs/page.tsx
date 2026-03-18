@@ -1,12 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+
+type UserRole = "PUTNIK" | "OPERATOR";
+
+type MeResponse = {
+  user: {
+    id: string;
+    name?: string;
+    email: string;
+    role: UserRole;
+    emailVerified: boolean;
+  };
+};
 
 type LogUser = {
   name?: string;
   email?: string;
-  role?: "USER" | "MANAGER" | "ADMIN";
+  role?: UserRole;
 };
 
 type AccessLogItem = {
@@ -21,24 +33,8 @@ type AccessLogItem = {
 
 type LogsResponse = {
   logs: AccessLogItem[];
+  message?: string;
 };
-
-type MeResponse = {
-  user: {
-    id: string;
-    name?: string;
-    email: string;
-    role: "USER" | "MANAGER" | "ADMIN";
-    emailVerified: boolean;
-  };
-};
-
-function getCookie(name: string) {
-  return document.cookie
-    .split("; ")
-    .find((row) => row.startsWith(`${name}=`))
-    ?.split("=")[1];
-}
 
 function formatDate(value?: string | null) {
   if (!value) return "Nema podatka";
@@ -50,28 +46,74 @@ function formatDate(value?: string | null) {
   return date.toLocaleString("sr-RS");
 }
 
-export default function LogsPage() {
+function getMethodTone(method?: string) {
+  switch ((method || "").toUpperCase()) {
+    case "GET":
+      return "border-blue-500/30 bg-blue-500/10 text-blue-200";
+    case "POST":
+      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
+    case "PUT":
+    case "PATCH":
+      return "border-amber-500/30 bg-amber-500/10 text-amber-200";
+    case "DELETE":
+      return "border-red-500/30 bg-red-500/10 text-red-200";
+    default:
+      return "border-slate-700 bg-slate-800 text-slate-200";
+  }
+}
+
+function getStatusTone(statusCode?: number) {
+  if (!statusCode) {
+    return "border-slate-700 bg-slate-800 text-slate-200";
+  }
+
+  if (statusCode >= 200 && statusCode < 300) {
+    return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
+  }
+
+  if (statusCode >= 300 && statusCode < 400) {
+    return "border-blue-500/30 bg-blue-500/10 text-blue-200";
+  }
+
+  if (statusCode >= 400 && statusCode < 500) {
+    return "border-amber-500/30 bg-amber-500/10 text-amber-200";
+  }
+
+  return "border-red-500/30 bg-red-500/10 text-red-200";
+}
+
+export default function AdminLogsPage() {
   const [me, setMe] = useState<MeResponse["user"] | null>(null);
   const [logs, setLogs] = useState<AccessLogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const token = getCookie("access_token");
+  async function loadLogs() {
+    const logsRes = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/api/admin/access-logs`,
+      {
+        credentials: "include",
+      },
+    );
 
-    if (!token) {
-      setPageError("Niste ulogovani.");
-      setLoading(false);
-      return;
+    const logsData: LogsResponse = await logsRes.json();
+
+    if (!logsRes.ok) {
+      throw new Error(logsData?.message || "Greška pri učitavanju logova.");
     }
 
+    setLogs(logsData.logs || []);
+  }
+
+  useEffect(() => {
     async function loadData() {
       try {
-        const meRes = await fetch("http://localhost:5000/api/auth/me", {
-          headers: {
+        const meRes = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`,
+          {
             credentials: "include",
           },
-        });
+        );
 
         const meData = await meRes.json();
 
@@ -81,32 +123,13 @@ export default function LogsPage() {
           );
         }
 
-        if (!["ADMIN", "MANAGER"].includes(meData.user.role)) {
-          throw new Error("Nemate pristup access logovima.");
+        if (meData.user.role !== "OPERATOR") {
+          throw new Error("Nemate pristup pristupnim logovima.");
         }
 
         setMe(meData.user);
 
-        const logsRes = await fetch(
-          "http://localhost:5000/api/admin/access-logs",
-          {
-            headers: {
-              credentials: "include",
-            },
-          },
-        );
-
-        const logsData: LogsResponse = await logsRes.json();
-
-        if (!logsRes.ok) {
-          throw new Error(
-            logsData?.logs
-              ? "Greška pri učitavanju logova."
-              : "Greška pri učitavanju logova.",
-          );
-        }
-
-        setLogs(logsData.logs || []);
+        await loadLogs();
         setPageError(null);
       } catch (err) {
         setPageError(
@@ -120,9 +143,29 @@ export default function LogsPage() {
     loadData();
   }, []);
 
+  const totalLogs = useMemo(() => logs.length, [logs]);
+  const successfulLogs = useMemo(
+    () =>
+      logs.filter(
+        (log) => (log.statusCode || 0) >= 200 && (log.statusCode || 0) < 300,
+      ).length,
+    [logs],
+  );
+  const clientErrorLogs = useMemo(
+    () =>
+      logs.filter(
+        (log) => (log.statusCode || 0) >= 400 && (log.statusCode || 0) < 500,
+      ).length,
+    [logs],
+  );
+  const serverErrorLogs = useMemo(
+    () => logs.filter((log) => (log.statusCode || 0) >= 500).length,
+    [logs],
+  );
+
   if (loading) {
     return (
-      <main className="min-h-screen px-4 py-8 text-slate-100">
+      <main className="min-h-screen bg-slate-950 px-4 py-8 text-slate-100">
         <div className="mx-auto max-w-7xl rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-lg">
           Učitavanje logova...
         </div>
@@ -132,7 +175,7 @@ export default function LogsPage() {
 
   if (pageError || !me) {
     return (
-      <main className="min-h-screen px-4 py-8 text-slate-100">
+      <main className="min-h-screen bg-slate-950 px-4 py-8 text-slate-100">
         <div className="mx-auto max-w-4xl rounded-2xl border border-red-500/20 bg-red-500/10 p-6 shadow-lg">
           <h1 className="text-2xl font-bold text-white">Pristup odbijen</h1>
           <p className="mt-2 text-red-200">
@@ -141,10 +184,10 @@ export default function LogsPage() {
 
           <div className="mt-4">
             <Link
-              href="/dashboard"
+              href="/admin"
               className="inline-block rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 font-medium text-slate-200 transition hover:bg-slate-700"
             >
-              Nazad na dashboard
+              Nazad na admin panel
             </Link>
           </div>
         </div>
@@ -153,36 +196,65 @@ export default function LogsPage() {
   }
 
   return (
-    <main className="min-h-screen px-4 py-8 text-slate-100">
+    <main className="min-h-screen bg-slate-950 px-4 py-8 text-slate-100">
       <div className="mx-auto max-w-7xl">
-        <section className="mb-6 rounded-3xl border border-blue-500/20 bg-linear-to-br from-blue-600/20 to-slate-900 p-6 shadow-xl">
+        <section className="mb-6 rounded-3xl border border-indigo-500/20 bg-linear-to-br from-indigo-600/20 to-slate-900 p-6 shadow-xl">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
-              <p className="text-sm font-medium uppercase tracking-[0.2em] text-blue-300">
-                Access logs
+              <p className="text-sm font-medium uppercase tracking-[0.2em] text-indigo-300">
+                Pristupni logovi
               </p>
               <h1 className="mt-3 text-3xl font-extrabold text-white">
                 Pregled pristupa sistemu
               </h1>
               <p className="mt-2 max-w-3xl text-slate-300">
-                Ova stranica prikazuje evidenciju pristupa API rutama i dostupna
-                je za MANAGER i ADMIN korisnike.
+                Operator može da pregleda evidenciju pristupa API rutama,
+                korisnike koji su izvršili zahteve, status odgovora i vreme
+                pristupa sistemu.
               </p>
             </div>
 
             <div className="flex flex-wrap gap-3">
               <Link
-                href={me.role === "ADMIN" ? "/admin" : "/dashboard"}
+                href="/travels"
                 className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 font-medium text-slate-200 transition hover:bg-slate-700"
               >
-                Nazad
+                Javna putovanja
+              </Link>
+
+              <Link
+                href="/admin"
+                className="rounded-xl border border-purple-500/30 bg-purple-500/10 px-4 py-3 font-medium text-purple-200 transition hover:bg-purple-500/20"
+              >
+                Admin panel
+              </Link>
+
+              <Link
+                href="/admin/travels"
+                className="rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-3 font-medium text-blue-200 transition hover:bg-blue-500/20"
+              >
+                Putovanja
+              </Link>
+
+              <Link
+                href="/admin/destinations"
+                className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 font-medium text-cyan-200 transition hover:bg-cyan-500/20"
+              >
+                Destinacije
+              </Link>
+
+              <Link
+                href="/logout"
+                className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 font-medium text-red-200 transition hover:bg-red-500/20"
+              >
+                Logout
               </Link>
             </div>
           </div>
 
           <div className="mt-5 flex flex-wrap gap-3">
-            <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-sm font-medium text-blue-200">
-              Pristup: {me.role}
+            <span className="rounded-full border border-indigo-500/30 bg-indigo-500/10 px-3 py-1 text-sm font-medium text-indigo-200">
+              OPERATOR pristup
             </span>
             <span className="rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-sm font-medium text-green-200">
               Evidencija API pristupa
@@ -190,50 +262,96 @@ export default function LogsPage() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-lg">
-          <div className="mb-5">
-            <h2 className="text-xl font-bold text-white">
-              Poslednji access logovi
-            </h2>
-            <p className="mt-1 text-sm text-slate-400">
-              Pregled poslednjih 100 API pristupa zabeleženih u sistemu.
+        <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-lg">
+            <p className="text-sm text-slate-400">Ukupno logova</p>
+            <p className="mt-2 text-3xl font-extrabold text-white">
+              {totalLogs}
+            </p>
+            <p className="mt-2 text-sm text-slate-500">
+              Zabeleženi pristupi API rutama.
             </p>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="min-w-full border-separate border-spacing-y-3">
-              <thead>
-                <tr>
-                  <th className="px-4 py-2 text-left text-sm font-semibold text-slate-300">
-                    Korisnik
-                  </th>
-                  <th className="px-4 py-2 text-left text-sm font-semibold text-slate-300">
-                    Email
-                  </th>
-                  <th className="px-4 py-2 text-left text-sm font-semibold text-slate-300">
-                    Rola
-                  </th>
-                  <th className="px-4 py-2 text-left text-sm font-semibold text-slate-300">
-                    Method
-                  </th>
-                  <th className="px-4 py-2 text-left text-sm font-semibold text-slate-300">
-                    Path
-                  </th>
-                  <th className="px-4 py-2 text-left text-sm font-semibold text-slate-300">
-                    Status
-                  </th>
-                  <th className="px-4 py-2 text-left text-sm font-semibold text-slate-300">
-                    IP
-                  </th>
-                  <th className="px-4 py-2 text-left text-sm font-semibold text-slate-300">
-                    Vreme
-                  </th>
-                </tr>
-              </thead>
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-lg">
+            <p className="text-sm text-slate-400">Uspešni zahtevi</p>
+            <p className="mt-2 text-3xl font-extrabold text-white">
+              {successfulLogs}
+            </p>
+            <p className="mt-2 text-sm text-slate-500">
+              Odgovori sa 2xx status kodom.
+            </p>
+          </div>
 
-              <tbody>
-                {logs.length > 0 ? (
-                  logs.map((log, index) => (
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-lg">
+            <p className="text-sm text-slate-400">Client greške</p>
+            <p className="mt-2 text-3xl font-extrabold text-white">
+              {clientErrorLogs}
+            </p>
+            <p className="mt-2 text-sm text-slate-500">
+              Zahtevi sa 4xx status kodom.
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-lg">
+            <p className="text-sm text-slate-400">Server greške</p>
+            <p className="mt-2 text-3xl font-extrabold text-white">
+              {serverErrorLogs}
+            </p>
+            <p className="mt-2 text-sm text-slate-500">
+              Zahtevi sa 5xx status kodom.
+            </p>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-lg">
+          <div className="mb-5">
+            <h2 className="text-xl font-bold text-white">
+              Poslednji pristupni logovi
+            </h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Pregled poslednjih zabeleženih API pristupa u sistemu.
+            </p>
+          </div>
+
+          {logs.length === 0 ? (
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/40 px-4 py-6 text-center text-sm text-slate-400">
+              Nema dostupnih pristupnih logova.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full border-separate border-spacing-y-3">
+                <thead>
+                  <tr>
+                    <th className="px-4 py-2 text-left text-sm font-semibold text-slate-300">
+                      Korisnik
+                    </th>
+                    <th className="px-4 py-2 text-left text-sm font-semibold text-slate-300">
+                      Email
+                    </th>
+                    <th className="px-4 py-2 text-left text-sm font-semibold text-slate-300">
+                      Rola
+                    </th>
+                    <th className="px-4 py-2 text-left text-sm font-semibold text-slate-300">
+                      Method
+                    </th>
+                    <th className="px-4 py-2 text-left text-sm font-semibold text-slate-300">
+                      Path
+                    </th>
+                    <th className="px-4 py-2 text-left text-sm font-semibold text-slate-300">
+                      Status
+                    </th>
+                    <th className="px-4 py-2 text-left text-sm font-semibold text-slate-300">
+                      IP
+                    </th>
+                    <th className="px-4 py-2 text-left text-sm font-semibold text-slate-300">
+                      Vreme
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {logs.map((log, index) => (
                     <tr
                       key={log._id || `${log.path}-${index}`}
                       className="rounded-2xl border border-slate-800 bg-slate-950/40"
@@ -252,16 +370,22 @@ export default function LogsPage() {
                         </span>
                       </td>
 
-                      <td className="px-4 py-4 text-sm font-semibold text-blue-200">
-                        {log.method || "N/A"}
+                      <td className="px-4 py-4 text-sm">
+                        <span
+                          className={`rounded-full border px-3 py-1 text-xs font-semibold ${getMethodTone(log.method)}`}
+                        >
+                          {log.method || "N/A"}
+                        </span>
                       </td>
 
                       <td className="px-4 py-4 text-sm text-slate-300">
-                        {log.path || "N/A"}
+                        <span className="break-all">{log.path || "N/A"}</span>
                       </td>
 
                       <td className="px-4 py-4 text-sm">
-                        <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-200">
+                        <span
+                          className={`rounded-full border px-3 py-1 text-xs font-semibold ${getStatusTone(log.statusCode)}`}
+                        >
                           {log.statusCode ?? "N/A"}
                         </span>
                       </td>
@@ -274,20 +398,11 @@ export default function LogsPage() {
                         {formatDate(log.createdAt)}
                       </td>
                     </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td
-                      colSpan={8}
-                      className="rounded-2xl border border-slate-800 bg-slate-950/40 px-4 py-6 text-center text-sm text-slate-400"
-                    >
-                      Nema dostupnih access logova.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
       </div>
     </main>

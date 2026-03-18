@@ -3,6 +3,18 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+type UserRole = "PUTNIK" | "OPERATOR";
+
+type MeResponse = {
+  user?: {
+    id: string;
+    name?: string;
+    email: string;
+    role: UserRole;
+    emailVerified: boolean;
+  };
+};
+
 type Destination = {
   _id: string;
   name: string;
@@ -29,10 +41,12 @@ type TravelsResponse = {
     limit: number;
     pages: number;
   };
+  message?: string;
 };
 
 type DestinationsResponse = {
   destinations: Destination[];
+  message?: string;
 };
 
 function formatPrice(value: number) {
@@ -46,6 +60,7 @@ function formatPrice(value: number) {
 export default function TravelsPage() {
   const [travels, setTravels] = useState<Travel[]>([]);
   const [destinations, setDestinations] = useState<Destination[]>([]);
+  const [me, setMe] = useState<MeResponse["user"] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -79,6 +94,31 @@ export default function TravelsPage() {
   }, [page, sort, search, destination, minPrice, maxPrice]);
 
   useEffect(() => {
+    async function loadMe() {
+      try {
+        const res = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`,
+          {
+            credentials: "include",
+          },
+        );
+
+        if (!res.ok) {
+          setMe(null);
+          return;
+        }
+
+        const data: MeResponse = await res.json();
+        setMe(data.user || null);
+      } catch {
+        setMe(null);
+      }
+    }
+
+    loadMe();
+  }, []);
+
+  useEffect(() => {
     async function loadDestinations() {
       try {
         const res = await fetch(
@@ -88,8 +128,7 @@ export default function TravelsPage() {
 
         if (!res.ok) {
           throw new Error(
-            (data as unknown as { message?: string })?.message ||
-              "Greška pri učitavanju destinacija.",
+            data?.message || "Greška pri učitavanju destinacija.",
           );
         }
 
@@ -114,10 +153,7 @@ export default function TravelsPage() {
         const data: TravelsResponse = await res.json();
 
         if (!res.ok) {
-          throw new Error(
-            (data as unknown as { message?: string })?.message ||
-              "Greška pri učitavanju putovanja.",
-          );
+          throw new Error(data?.message || "Greška pri učitavanju putovanja.");
         }
 
         setTravels(data.travels || []);
@@ -172,19 +208,48 @@ export default function TravelsPage() {
             </div>
 
             <div className="flex flex-wrap gap-3">
-              <Link
-                href="/login"
-                className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 font-medium text-slate-200 transition hover:bg-slate-700"
-              >
-                Login
-              </Link>
+              {me ? (
+                <>
+                  <Link
+                    href="/profile"
+                    className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 font-medium text-emerald-200 transition hover:bg-emerald-500/20"
+                  >
+                    Profil
+                  </Link>
 
-              <Link
-                href="/register"
-                className="rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-3 font-medium text-blue-200 transition hover:bg-blue-500/20"
-              >
-                Registruj se
-              </Link>
+                  {me.role === "OPERATOR" ? (
+                    <Link
+                      href="/admin"
+                      className="rounded-xl border border-purple-500/30 bg-purple-500/10 px-4 py-3 font-medium text-purple-200 transition hover:bg-purple-500/20"
+                    >
+                      Admin panel
+                    </Link>
+                  ) : null}
+
+                  <Link
+                    href="/logout"
+                    className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 font-medium text-red-200 transition hover:bg-red-500/20"
+                  >
+                    Logout
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <Link
+                    href="/login"
+                    className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 font-medium text-slate-200 transition hover:bg-slate-700"
+                  >
+                    Login
+                  </Link>
+
+                  <Link
+                    href="/register"
+                    className="rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-3 font-medium text-blue-200 transition hover:bg-blue-500/20"
+                  >
+                    Registruj se
+                  </Link>
+                </>
+              )}
             </div>
           </div>
         </section>
