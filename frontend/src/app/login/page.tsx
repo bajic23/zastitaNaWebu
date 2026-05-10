@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
   const search = useSearchParams();
   const next = search.get("next") || "/travels";
@@ -33,6 +33,12 @@ export default function LoginPage() {
 
       if (!res.ok) {
         setMsg(data?.message || "Login failed");
+        return;
+      }
+
+      if (data?.requiresOtp && data?.email) {
+        sessionStorage.setItem("mfa_email", data.email);
+        router.replace("/verify-otp");
         return;
       }
 
@@ -157,5 +163,13 @@ export default function LoginPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   );
 }

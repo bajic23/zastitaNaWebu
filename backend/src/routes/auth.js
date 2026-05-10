@@ -7,6 +7,8 @@ const passport = require("passport");
 
 const User = require("../models/User");
 const requireAuth = require("../middlewares/requireAuth");
+const logger = require("../utils/logger");
+const { generateOtp } = require("../utils/otp");
 
 const router = express.Router();
 const handleValidation = require("../middlewares/handleValidation");
@@ -63,6 +65,45 @@ const generateRefreshToken = () => crypto.randomBytes(64).toString("hex");
 
 const hashToken = (token) =>
   crypto.createHash("sha256").update(token).digest("hex");
+
+function createAccessToken(user) {
+  return jwt.sign(
+    { sub: user._id.toString(), role: user.role },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES_IN || "15m" },
+  );
+}
+
+function getAuthUserResponse(user) {
+  return {
+    id: user._id,
+    email: user.email,
+    role: user.role,
+    name: user.name || "",
+    emailVerified: user.emailVerified,
+  };
+}
+
+async function issueLoginTokens(user, req, res) {
+  user.failedLoginCount = 0;
+  user.blockedUntil = null;
+  user.lastLoginAt = new Date();
+  user.loginHistory.push({
+    at: new Date(),
+    ip: req.ip,
+    userAgent: req.headers["user-agent"],
+  });
+
+  const refreshToken = generateRefreshToken();
+  user.refreshTokenHash = hashToken(refreshToken);
+
+  await user.save();
+
+  const accessToken = createAccessToken(user);
+  res.cookie(ACCESS_COOKIE_NAME, accessToken, getAccessTokenCookieOptions());
+
+  return refreshToken;
+}
 
 // REGISTER
 router.post(
@@ -195,40 +236,21 @@ router.post(
 
       user.failedLoginCount = 0;
       user.blockedUntil = null;
-      user.lastLoginAt = new Date();
-      user.loginHistory.push({
-        at: new Date(),
-        ip: req.ip,
-        userAgent: req.headers["user-agent"],
-      });
-
-      const refreshToken = generateRefreshToken();
-      user.refreshTokenHash = hashToken(refreshToken);
+      const otp = generateOtp();
+      user.otpCode = otp.code;
+      user.otpExpiresAt = otp.expiresAt;
+      user.otpAttempts = 0;
 
       await user.save();
 
-      const accessToken = jwt.sign(
-        { sub: user._id.toString(), role: user.role },
-        process.env.JWT_SECRET,
-        { expiresIn: process.env.JWT_EXPIRES_IN || "15m" },
-      );
-
-      res.cookie(
-        ACCESS_COOKIE_NAME,
-        accessToken,
-        getAccessTokenCookieOptions(),
-      );
+      logger.info(`OTP generated for ${user.email}`);
+      console.log(`OTP for ${user.email}: ${otp.code}`);
 
       return res.json({
         message: "Uspešno logovanje.",
-        refreshToken,
-        user: {
-          id: user._id,
-          email: user.email,
-          role: user.role,
-          name: user.name || "",
-          emailVerified: user.emailVerified,
-        },
+        requiresOtp: true,
+        email: user.email,
+        message: "OTP verification required",
       });
     } catch (error) {
       console.error(error);
@@ -236,6 +258,120 @@ router.post(
     }
   },
 );
+
+// VERIFY OTP
+router.post("/verify-otp", loginLimiter, async (req, res) => {
+  try {
+    const { email, otp } = req.body ?? {};
+
+    if (!email || !otp) {
+      return res.status(400).json({ message: "Email i OTP kod su obavezni." });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const otpCode = String(otp).trim();
+    const user = await User.findOne({ email: normalizedEmail });
+
+    if (!user || !user.otpCode) {
+      logger.info(`OTP verification failed for ${normalizedEmail}`);
+      return res.status(400).json({ message: "OTP kod nije pronadjen." });
+    }
+
+    if (user.otpExpiresAt && user.otpExpiresAt <= new Date()) {
+      user.otpCode = null;
+      user.otpExpiresAt = null;
+      user.otpAttempts = 0;
+      await user.save();
+
+      logger.info(`OTP expired for ${normalizedEmail}`);
+      return res.status(400).json({ message: "OTP kod je istekao." });
+    }
+
+    if (user.otpAttempts > 5) {
+      logger.info(
+        `OTP verification failed for ${normalizedEmail}: too many attempts`,
+      );
+      return res
+        .status(429)
+        .json({ message: "Previse neuspesnih OTP pokusaja." });
+    }
+
+    if (user.otpCode !== otpCode) {
+      user.otpAttempts += 1;
+      await user.save();
+
+      logger.info(`OTP verification failed for ${normalizedEmail}`);
+
+      if (user.otpAttempts > 5) {
+        return res
+          .status(429)
+          .json({ message: "Previse neuspesnih OTP pokusaja." });
+      }
+
+      return res.status(401).json({ message: "Neispravan OTP kod." });
+    }
+
+    user.otpCode = null;
+    user.otpExpiresAt = null;
+    user.otpAttempts = 0;
+
+    const refreshToken = await issueLoginTokens(user, req, res);
+
+    logger.info(`OTP verification success for ${normalizedEmail}`);
+
+    return res.json({
+      message: "Uspesno logovanje.",
+      refreshToken,
+      user: getAuthUserResponse(user),
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Greska na serveru." });
+  }
+});
+
+// RESEND OTP
+router.post("/resend-otp", loginLimiter, async (req, res) => {
+  try {
+    const { email } = req.body ?? {};
+
+    if (!email) {
+      return res.status(400).json({ message: "Email je obavezan." });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const user = await User.findOne({ email: normalizedEmail });
+
+    if (!user) {
+      return res.status(404).json({ message: "Korisnik nije pronadjen." });
+    }
+
+    if (!user.emailVerified) {
+      return res.status(403).json({
+        message:
+          "Email nije verifikovan. Proveri inbox i potvrdi email pre logovanja.",
+      });
+    }
+
+    const otp = generateOtp();
+    user.otpCode = otp.code;
+    user.otpExpiresAt = otp.expiresAt;
+    user.otpAttempts = 0;
+    await user.save();
+
+    logger.info(`OTP generated for ${user.email}`);
+    console.log(`OTP for ${user.email}: ${otp.code}`);
+
+    return res.json({
+      requiresOtp: true,
+      email: user.email,
+      message: "OTP verification required",
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Greska na serveru." });
+  }
+});
 
 // GOOGLE LOGIN
 router.get(

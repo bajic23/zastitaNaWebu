@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-export default function LoginSuccessPage() {
+function LoginSuccessContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -25,5 +25,13 @@ export default function LoginSuccessPage() {
     <main className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-100">
       <p className="text-sm text-slate-300">Prijava u toku...</p>
     </main>
+  );
+}
+
+export default function LoginSuccessPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginSuccessContent />
+    </Suspense>
   );
 }
