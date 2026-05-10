@@ -8,6 +8,7 @@ export default function VerifyOtpPage() {
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
+  const [msgType, setMsgType] = useState<"error" | "success">("error");
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
 
@@ -25,6 +26,7 @@ export default function VerifyOtpPage() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setMsg(null);
+    setMsgType("error");
 
     if (!email || !otp.trim()) {
       setMsg("Unesi OTP kod.");
@@ -77,6 +79,7 @@ export default function VerifyOtpPage() {
     }
 
     setMsg(null);
+    setMsgType("error");
     setResending(true);
 
     try {
@@ -97,6 +100,7 @@ export default function VerifyOtpPage() {
         return;
       }
 
+      setMsgType("success");
       setMsg("Novi OTP je generisan. Proveri backend konzolu.");
     } catch {
       setMsg("Greska pri konekciji sa serverom.");
@@ -146,7 +150,13 @@ export default function VerifyOtpPage() {
                 </div>
 
                 {msg ? (
-                  <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                  <div
+                    className={`rounded-xl border px-4 py-3 text-sm ${
+                      msgType === "success"
+                        ? "border-green-500/20 bg-green-500/10 text-green-200"
+                        : "border-red-500/20 bg-red-500/10 text-red-200"
+                    }`}
+                  >
                     {msg}
                   </div>
                 ) : null}

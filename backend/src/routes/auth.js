@@ -293,7 +293,7 @@ router.post("/verify-otp", loginLimiter, async (req, res) => {
       );
       return res
         .status(429)
-        .json({ message: "Previse neuspesnih OTP pokusaja." });
+        .json({ message: "Previše neuspešnih OTP pokušaja." });
     }
 
     if (user.otpCode !== otpCode) {
@@ -305,7 +305,7 @@ router.post("/verify-otp", loginLimiter, async (req, res) => {
       if (user.otpAttempts > 5) {
         return res
           .status(429)
-          .json({ message: "Previse neuspesnih OTP pokusaja." });
+          .json({ message: "Previše neuspešnih OTP pokušaja." });
       }
 
       return res.status(401).json({ message: "Neispravan OTP kod." });
@@ -320,7 +320,7 @@ router.post("/verify-otp", loginLimiter, async (req, res) => {
     logger.info(`OTP verification success for ${normalizedEmail}`);
 
     return res.json({
-      message: "Uspesno logovanje.",
+      message: "Uspešno logovanje.",
       refreshToken,
       user: getAuthUserResponse(user),
     });
