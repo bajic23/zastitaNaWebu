@@ -4,6 +4,8 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const rateLimit = require("express-rate-limit");
 const passport = require("passport");
+const QRCode = require("qrcode");
+const { generateSecret, generateURI, verifySync } = require("otplib");
 
 const User = require("../models/User");
 const requireAuth = require("../middlewares/requireAuth");
@@ -18,6 +20,8 @@ const {
   updateMeValidator,
 } = require("../validators");
 const ACCESS_COOKIE_NAME = "accessToken";
+const MFA_CHALLENGE_TTL_MS = 5 * 60 * 1000;
+const MFA_ISSUER = process.env.MFA_ISSUER || "ZastitaNaWebu";
 
 function getAccessTokenCookieOptions() {
   const isProduction = process.env.NODE_ENV === "production";
@@ -66,6 +70,40 @@ const generateRefreshToken = () => crypto.randomBytes(64).toString("hex");
 const hashToken = (token) =>
   crypto.createHash("sha256").update(token).digest("hex");
 
+function generateMfaChallenge() {
+  const token = crypto.randomBytes(32).toString("hex");
+
+  return {
+    token,
+    hash: hashToken(token),
+    expiresAt: new Date(Date.now() + MFA_CHALLENGE_TTL_MS),
+  };
+}
+
+function generateBackupCodes(count = 8) {
+  return Array.from({ length: count }, () =>
+    crypto.randomBytes(4).toString("hex").toUpperCase(),
+  );
+}
+
+function hashBackupCode(code) {
+  return hashToken(String(code).trim().replace(/\s+/g, "").toUpperCase());
+}
+
+function verifyAuthenticatorCode(secret, code) {
+  try {
+    const result = verifySync({
+      secret,
+      token: String(code || "").trim(),
+      window: 1,
+    });
+
+    return !!result.valid;
+  } catch {
+    return false;
+  }
+}
+
 function createAccessToken(user) {
   return jwt.sign(
     { sub: user._id.toString(), role: user.role },
@@ -81,12 +119,16 @@ function getAuthUserResponse(user) {
     role: user.role,
     name: user.name || "",
     emailVerified: user.emailVerified,
+    mfaEnabled: !!user.mfaEnabled,
   };
 }
 
 async function issueLoginTokens(user, req, res) {
   user.failedLoginCount = 0;
   user.blockedUntil = null;
+  user.mfaLoginChallengeHash = null;
+  user.mfaLoginChallengeExpiresAt = null;
+  user.mfaLoginAttempts = 0;
   user.lastLoginAt = new Date();
   user.loginHistory.push({
     at: new Date(),
@@ -234,23 +276,29 @@ router.post(
         return res.status(401).json({ message: "Neispravni podaci." });
       }
 
-      user.failedLoginCount = 0;
-      user.blockedUntil = null;
-      const otp = generateOtp();
-      user.otpCode = otp.code;
-      user.otpExpiresAt = otp.expiresAt;
-      user.otpAttempts = 0;
+      if (user.mfaEnabled && user.mfaSecret) {
+        const challenge = generateMfaChallenge();
+        user.failedLoginCount = 0;
+        user.blockedUntil = null;
+        user.mfaLoginChallengeHash = challenge.hash;
+        user.mfaLoginChallengeExpiresAt = challenge.expiresAt;
+        user.mfaLoginAttempts = 0;
+        await user.save();
 
-      await user.save();
+        return res.json({
+          message: "MFA verification required",
+          requiresMfa: true,
+          email: user.email,
+          challengeToken: challenge.token,
+        });
+      }
 
-      logger.info(`OTP generated for ${user.email}`);
-      console.log(`OTP for ${user.email}: ${otp.code}`);
+      const refreshToken = await issueLoginTokens(user, req, res);
 
       return res.json({
         message: "Uspešno logovanje.",
-        requiresOtp: true,
-        email: user.email,
-        message: "OTP verification required",
+        refreshToken,
+        user: getAuthUserResponse(user),
       });
     } catch (error) {
       console.error(error);
@@ -262,7 +310,7 @@ router.post(
 // VERIFY OTP
 router.post("/verify-otp", loginLimiter, async (req, res) => {
   try {
-    const { email, otp } = req.body ?? {};
+    const { email, otp, challengeToken } = req.body ?? {};
 
     if (!email || !otp) {
       return res.status(400).json({ message: "Email i OTP kod su obavezni." });
@@ -271,6 +319,66 @@ router.post("/verify-otp", loginLimiter, async (req, res) => {
     const normalizedEmail = String(email).trim().toLowerCase();
     const otpCode = String(otp).trim();
     const user = await User.findOne({ email: normalizedEmail });
+
+    if (user?.mfaEnabled && user.mfaSecret) {
+      if (!challengeToken) {
+        return res.status(400).json({ message: "MFA challenge nedostaje." });
+      }
+
+      const challengeHash = hashToken(String(challengeToken));
+      const challengeExpired =
+        !user.mfaLoginChallengeExpiresAt ||
+        user.mfaLoginChallengeExpiresAt <= new Date();
+
+      if (
+        !user.mfaLoginChallengeHash ||
+        user.mfaLoginChallengeHash !== challengeHash ||
+        challengeExpired
+      ) {
+        user.mfaLoginChallengeHash = null;
+        user.mfaLoginChallengeExpiresAt = null;
+        user.mfaLoginAttempts = 0;
+        await user.save();
+
+        logger.info(`MFA challenge invalid for ${normalizedEmail}`);
+        return res.status(401).json({ message: "MFA challenge je istekao." });
+      }
+
+      if (user.mfaLoginAttempts >= 5) {
+        return res
+          .status(429)
+          .json({ message: "Previše neuspešnih MFA pokušaja." });
+      }
+
+      const normalizedBackupCode = hashBackupCode(otpCode);
+      const backupCodeIndex = user.mfaBackupCodeHashes.findIndex(
+        (codeHash) => codeHash === normalizedBackupCode,
+      );
+      const validTotp = verifyAuthenticatorCode(user.mfaSecret, otpCode);
+      const validBackupCode = backupCodeIndex !== -1;
+
+      if (!validTotp && !validBackupCode) {
+        user.mfaLoginAttempts += 1;
+        await user.save();
+
+        logger.info(`MFA verification failed for ${normalizedEmail}`);
+        return res.status(401).json({ message: "Neispravan MFA kod." });
+      }
+
+      if (validBackupCode) {
+        user.mfaBackupCodeHashes.splice(backupCodeIndex, 1);
+      }
+
+      const refreshToken = await issueLoginTokens(user, req, res);
+
+      logger.info(`MFA verification success for ${normalizedEmail}`);
+
+      return res.json({
+        message: "Uspešno logovanje.",
+        refreshToken,
+        user: getAuthUserResponse(user),
+      });
+    }
 
     if (!user || !user.otpCode) {
       logger.info(`OTP verification failed for ${normalizedEmail}`);
@@ -373,6 +481,134 @@ router.post("/resend-otp", loginLimiter, async (req, res) => {
   }
 });
 
+// MFA SETUP
+router.post("/mfa/setup", requireAuth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({ message: "Korisnik nije pronađen." });
+    }
+
+    if (user.mfaEnabled) {
+      return res.status(400).json({ message: "MFA je već uključen." });
+    }
+
+    const secret = generateSecret();
+    const otpauthUrl = generateURI({
+      issuer: MFA_ISSUER,
+      label: user.email,
+      secret,
+    });
+    const qrCodeDataUrl = await QRCode.toDataURL(otpauthUrl);
+
+    user.mfaTempSecret = secret;
+    await user.save();
+
+    return res.json({
+      message: "MFA setup je kreiran.",
+      secret,
+      otpauthUrl,
+      qrCodeDataUrl,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Greška pri MFA setup-u." });
+  }
+});
+
+// MFA VERIFY SETUP
+router.post("/mfa/verify", requireAuth, async (req, res) => {
+  try {
+    const { code } = req.body ?? {};
+
+    if (!code) {
+      return res.status(400).json({ message: "MFA kod je obavezan." });
+    }
+
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({ message: "Korisnik nije pronađen." });
+    }
+
+    if (!user.mfaTempSecret) {
+      return res.status(400).json({ message: "MFA setup nije pokrenut." });
+    }
+
+    if (!verifyAuthenticatorCode(user.mfaTempSecret, code)) {
+      return res.status(401).json({ message: "Neispravan MFA kod." });
+    }
+
+    const backupCodes = generateBackupCodes();
+    user.mfaEnabled = true;
+    user.mfaSecret = user.mfaTempSecret;
+    user.mfaTempSecret = null;
+    user.mfaBackupCodeHashes = backupCodes.map(hashBackupCode);
+
+    await user.save();
+
+    return res.json({
+      message: "MFA je uspešno uključen.",
+      backupCodes,
+      user: getAuthUserResponse(user),
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Greška pri MFA verifikaciji." });
+  }
+});
+
+// MFA DISABLE
+router.post("/mfa/disable", requireAuth, async (req, res) => {
+  try {
+    const { code } = req.body ?? {};
+
+    if (!code) {
+      return res.status(400).json({ message: "MFA kod je obavezan." });
+    }
+
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({ message: "Korisnik nije pronađen." });
+    }
+
+    if (!user.mfaEnabled || !user.mfaSecret) {
+      return res.status(400).json({ message: "MFA nije uključen." });
+    }
+
+    const backupCodeHash = hashBackupCode(code);
+    const backupCodeIndex = user.mfaBackupCodeHashes.findIndex(
+      (codeHash) => codeHash === backupCodeHash,
+    );
+    const validCode =
+      verifyAuthenticatorCode(user.mfaSecret, code) || backupCodeIndex !== -1;
+
+    if (!validCode) {
+      return res.status(401).json({ message: "Neispravan MFA kod." });
+    }
+
+    user.mfaEnabled = false;
+    user.mfaSecret = null;
+    user.mfaTempSecret = null;
+    user.mfaBackupCodeHashes = [];
+    user.mfaLoginChallengeHash = null;
+    user.mfaLoginChallengeExpiresAt = null;
+    user.mfaLoginAttempts = 0;
+
+    await user.save();
+
+    return res.json({
+      message: "MFA je isključen.",
+      user: getAuthUserResponse(user),
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Greška pri isključivanju MFA." });
+  }
+});
+
 // GOOGLE LOGIN
 router.get(
   "/google",
@@ -387,6 +623,20 @@ router.get(
   }),
   async (req, res) => {
     try {
+      if (req.user.mfaEnabled && req.user.mfaSecret) {
+        const challenge = generateMfaChallenge();
+        req.user.failedLoginCount = 0;
+        req.user.blockedUntil = null;
+        req.user.mfaLoginChallengeHash = challenge.hash;
+        req.user.mfaLoginChallengeExpiresAt = challenge.expiresAt;
+        req.user.mfaLoginAttempts = 0;
+        await req.user.save();
+
+        return res.redirect(
+          `http://localhost:3000/verify-otp?email=${encodeURIComponent(req.user.email)}&challengeToken=${encodeURIComponent(challenge.token)}`,
+        );
+      }
+
       req.user.failedLoginCount = 0;
       req.user.blockedUntil = null;
       req.user.lastLoginAt = new Date();
@@ -502,7 +752,7 @@ router.post("/refresh", async (req, res) => {
 router.get("/me", requireAuth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select(
-      "email role emailVerified lastLoginAt loginHistory createdAt updatedAt name googleId",
+      "email role emailVerified lastLoginAt loginHistory createdAt updatedAt name googleId mfaEnabled",
     );
 
     if (!user) {
@@ -519,6 +769,7 @@ router.get("/me", requireAuth, async (req, res) => {
         loginHistory: user.loginHistory,
         name: user.name || "",
         hasGoogleAccount: !!user.googleId,
+        mfaEnabled: !!user.mfaEnabled,
       },
     });
   } catch (e) {
@@ -585,6 +836,7 @@ router.patch(
           lastLoginAt: user.lastLoginAt,
           loginHistory: user.loginHistory,
           hasGoogleAccount: !!user.googleId,
+          mfaEnabled: !!user.mfaEnabled,
         },
       });
     } catch (e) {

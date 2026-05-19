@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
-export default function VerifyOtpPage() {
+function VerifyOtpForm() {
   const router = useRouter();
+  const search = useSearchParams();
   const [email, setEmail] = useState("");
+  const [challengeToken, setChallengeToken] = useState("");
   const [otp, setOtp] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [msgType, setMsgType] = useState<"error" | "success">("error");
@@ -13,15 +15,30 @@ export default function VerifyOtpPage() {
   const [resending, setResending] = useState(false);
 
   useEffect(() => {
+    const queryEmail = search.get("email") || "";
+    const queryChallengeToken = search.get("challengeToken") || "";
     const storedEmail = sessionStorage.getItem("mfa_email");
+    const storedChallengeToken = sessionStorage.getItem("mfa_challenge_token");
 
-    if (!storedEmail) {
+    if (queryEmail) {
+      sessionStorage.setItem("mfa_email", queryEmail);
+    }
+
+    if (queryChallengeToken) {
+      sessionStorage.setItem("mfa_challenge_token", queryChallengeToken);
+    }
+
+    const nextEmail = queryEmail || storedEmail;
+    const nextChallengeToken = queryChallengeToken || storedChallengeToken || "";
+
+    if (!nextEmail) {
       router.replace("/login");
       return;
     }
 
-    setEmail(storedEmail);
-  }, [router]);
+    setEmail(nextEmail);
+    setChallengeToken(nextChallengeToken);
+  }, [router, search]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -42,7 +59,11 @@ export default function VerifyOtpPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({ email, otp: otp.trim() }),
+          body: JSON.stringify({
+            email,
+            otp: otp.trim(),
+            challengeToken,
+          }),
         },
       );
 
@@ -58,6 +79,7 @@ export default function VerifyOtpPage() {
       }
 
       sessionStorage.removeItem("mfa_email");
+      sessionStorage.removeItem("mfa_challenge_token");
 
       if (data?.user?.role === "OPERATOR") {
         router.replace("/admin");
@@ -183,5 +205,13 @@ export default function VerifyOtpPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function VerifyOtpPage() {
+  return (
+    <Suspense fallback={null}>
+      <VerifyOtpForm />
+    </Suspense>
   );
 }

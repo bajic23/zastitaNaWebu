@@ -68,6 +68,41 @@ const userSchema = new mongoose.Schema(
       default: 0
     },
 
+    mfaEnabled: {
+      type: Boolean,
+      default: false
+    },
+
+    mfaSecret: {
+      type: String,
+      default: null
+    },
+
+    mfaTempSecret: {
+      type: String,
+      default: null
+    },
+
+    mfaBackupCodeHashes: {
+      type: [String],
+      default: []
+    },
+
+    mfaLoginChallengeHash: {
+      type: String,
+      default: null
+    },
+
+    mfaLoginChallengeExpiresAt: {
+      type: Date,
+      default: null
+    },
+
+    mfaLoginAttempts: {
+      type: Number,
+      default: 0
+    },
+
     blockedUntil: {
       type: Date,
       default: null

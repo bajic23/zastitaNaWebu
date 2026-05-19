@@ -36,8 +36,11 @@ function LoginForm() {
         return;
       }
 
-      if (data?.requiresOtp && data?.email) {
+      if ((data?.requiresMfa || data?.requiresOtp) && data?.email) {
         sessionStorage.setItem("mfa_email", data.email);
+        if (data?.challengeToken) {
+          sessionStorage.setItem("mfa_challenge_token", data.challengeToken);
+        }
         router.replace("/verify-otp");
         return;
       }

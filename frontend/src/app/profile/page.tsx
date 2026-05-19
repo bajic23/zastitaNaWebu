@@ -21,11 +21,23 @@ type MeUser = {
   lastLoginAt?: string | null;
   loginHistory?: LoginHistoryItem[];
   hasGoogleAccount?: boolean;
+  mfaEnabled?: boolean;
 };
 
 type MeResponse = {
   user?: MeUser;
   message?: string;
+};
+
+type MfaSetupResponse = {
+  message?: string;
+  secret?: string;
+  otpauthUrl?: string;
+  qrCodeDataUrl?: string;
+};
+
+type MfaVerifyResponse = MeResponse & {
+  backupCodes?: string[];
 };
 
 function formatDate(value?: string | null) {
@@ -52,6 +64,10 @@ export default function ProfilePage() {
 
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [mfaSetup, setMfaSetup] = useState<MfaSetupResponse | null>(null);
+  const [mfaCode, setMfaCode] = useState("");
+  const [mfaLoading, setMfaLoading] = useState(false);
+  const [backupCodes, setBackupCodes] = useState<string[]>([]);
 
   async function loadMe() {
     const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`, {
@@ -183,6 +199,141 @@ export default function ProfilePage() {
     }
   }
 
+  async function startMfaSetup() {
+    setActionMsg(null);
+    setActionError(null);
+    setBackupCodes([]);
+    setMfaLoading(true);
+
+    try {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/auth/mfa/setup`,
+        {
+          method: "POST",
+          credentials: "include",
+        },
+      );
+
+      const data: MfaSetupResponse = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.message || "MFA setup nije uspeo.");
+      }
+
+      setMfaSetup(data);
+      setActionMsg("Skeniraj QR kod i potvrdi šestocifrenim kodom.");
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Došlo je do greške pri MFA setup-u.",
+      );
+    } finally {
+      setMfaLoading(false);
+    }
+  }
+
+  async function verifyMfaSetup(e: React.FormEvent) {
+    e.preventDefault();
+    setActionMsg(null);
+    setActionError(null);
+
+    if (!mfaCode.trim()) {
+      setActionError("Unesi MFA kod iz Authenticator aplikacije.");
+      return;
+    }
+
+    setMfaLoading(true);
+
+    try {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/auth/mfa/verify`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ code: mfaCode.trim() }),
+        },
+      );
+
+      const data: MfaVerifyResponse = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.message || "MFA verifikacija nije uspela.");
+      }
+
+      if (data.user) {
+        setMe(data.user);
+      } else {
+        await loadMe();
+      }
+
+      setBackupCodes(data.backupCodes || []);
+      setMfaSetup(null);
+      setMfaCode("");
+      setActionMsg(data.message || "MFA je uspešno uključen.");
+    } catch (err) {
+      setActionError(
+        err instanceof Error
+          ? err.message
+          : "Došlo je do greške pri MFA verifikaciji.",
+      );
+    } finally {
+      setMfaLoading(false);
+    }
+  }
+
+  async function disableMfa() {
+    setActionMsg(null);
+    setActionError(null);
+
+    if (!mfaCode.trim()) {
+      setActionError("Unesi trenutni MFA kod ili jedan backup kod.");
+      return;
+    }
+
+    setMfaLoading(true);
+
+    try {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/auth/mfa/disable`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ code: mfaCode.trim() }),
+        },
+      );
+
+      const data: MeResponse = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.message || "Isključivanje MFA nije uspelo.");
+      }
+
+      if (data.user) {
+        setMe(data.user);
+      } else {
+        await loadMe();
+      }
+
+      setMfaCode("");
+      setBackupCodes([]);
+      setMfaSetup(null);
+      setActionMsg(data.message || "MFA je isključen.");
+    } catch (err) {
+      setActionError(
+        err instanceof Error
+          ? err.message
+          : "Došlo je do greške pri isključivanju MFA.",
+      );
+    } finally {
+      setMfaLoading(false);
+    }
+  }
+
   if (loading) {
     return (
       <main className="min-h-screen bg-slate-950 px-4 py-8 text-slate-100">
@@ -279,6 +430,15 @@ export default function ProfilePage() {
                 Google nalog povezan
               </span>
             ) : null}
+            <span
+              className={`rounded-full border px-3 py-1 text-sm font-medium ${
+                me.mfaEnabled
+                  ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-200"
+                  : "border-slate-600 bg-slate-800 text-slate-300"
+              }`}
+            >
+              MFA: {me.mfaEnabled ? "uključen" : "isključen"}
+            </span>
           </div>
         </section>
 
@@ -386,6 +546,163 @@ export default function ProfilePage() {
             </div>
           </section>
         </div>
+
+        <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-lg">
+          <div className="mb-5">
+            <h2 className="text-xl font-bold text-white">
+              Multifaktor autentifikacija
+            </h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Poveži nalog sa Google Authenticator aplikacijom.
+            </p>
+          </div>
+
+          {me.mfaEnabled ? (
+            <div className="space-y-5">
+              <div className="grid gap-4 md:grid-cols-[1fr_280px]">
+                <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-4">
+                  <p className="text-sm font-semibold text-cyan-200">
+                    MFA je uključen
+                  </p>
+                  <p className="mt-2 text-sm text-cyan-100/90">
+                    Pri sledećem loginu, posle lozinke će biti potreban kod iz
+                    Authenticator aplikacije.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-300">
+                    Kod za isključivanje
+                  </label>
+                  <input
+                    value={mfaCode}
+                    onChange={(e) => setMfaCode(e.target.value)}
+                    placeholder="123456 ili backup kod"
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-500"
+                  />
+                  <button
+                    type="button"
+                    disabled={mfaLoading}
+                    onClick={disableMfa}
+                    className="mt-3 w-full rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 font-semibold text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {mfaLoading ? "Provera..." : "Isključi MFA"}
+                  </button>
+                </div>
+              </div>
+
+              {backupCodes.length > 0 ? (
+                <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4">
+                  <p className="text-sm font-semibold text-amber-200">
+                    Backup kodovi
+                  </p>
+                  <p className="mt-2 text-sm text-amber-100/90">
+                    Sačuvaj ove kodove sada. Prikazuju se samo jednom.
+                  </p>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2 md:grid-cols-4">
+                    {backupCodes.map((code) => (
+                      <code
+                        key={code}
+                        className="rounded-lg border border-amber-500/20 bg-slate-950/70 px-3 py-2 text-center text-sm text-amber-100"
+                      >
+                        {code}
+                      </code>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {!mfaSetup ? (
+                <button
+                  type="button"
+                  disabled={mfaLoading}
+                  onClick={startMfaSetup}
+                  className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 font-semibold text-cyan-200 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {mfaLoading ? "Kreiranje..." : "Uključi MFA"}
+                </button>
+              ) : (
+                <div className="grid gap-6 md:grid-cols-[260px_1fr]">
+                  <div className="rounded-2xl border border-slate-800 bg-white p-4">
+                    {mfaSetup.qrCodeDataUrl ? (
+                      <img
+                        src={mfaSetup.qrCodeDataUrl}
+                        alt="MFA QR kod"
+                        className="h-auto w-full"
+                      />
+                    ) : null}
+                  </div>
+
+                  <form onSubmit={verifyMfaSetup} className="space-y-4">
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-300">
+                        Kod iz Authenticator aplikacije
+                      </label>
+                      <input
+                        value={mfaCode}
+                        onChange={(e) => setMfaCode(e.target.value)}
+                        inputMode="numeric"
+                        maxLength={6}
+                        placeholder="123456"
+                        className="w-full rounded-xl border border-slate-700 bg-slate-950/70 px-4 py-3 text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-500"
+                      />
+                    </div>
+
+                    {mfaSetup.secret ? (
+                      <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-4">
+                        <p className="text-sm text-slate-400">Manual key</p>
+                        <p className="mt-1 break-all font-mono text-sm text-slate-100">
+                          {mfaSetup.secret}
+                        </p>
+                      </div>
+                    ) : null}
+
+                    <div className="flex flex-wrap gap-3">
+                      <button
+                        type="submit"
+                        disabled={mfaLoading}
+                        className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 font-semibold text-cyan-200 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {mfaLoading ? "Provera..." : "Potvrdi MFA"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={mfaLoading}
+                        onClick={() => {
+                          setMfaSetup(null);
+                          setMfaCode("");
+                        }}
+                        className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 font-semibold text-slate-100 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Otkaži
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
+              {backupCodes.length > 0 ? (
+                <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4">
+                  <p className="text-sm font-semibold text-amber-200">
+                    Backup kodovi
+                  </p>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2 md:grid-cols-4">
+                    {backupCodes.map((code) => (
+                      <code
+                        key={code}
+                        className="rounded-lg border border-amber-500/20 bg-slate-950/70 px-3 py-2 text-center text-sm text-amber-100"
+                      >
+                        {code}
+                      </code>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          )}
+        </section>
 
         <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-lg">
           <div className="mb-5">
