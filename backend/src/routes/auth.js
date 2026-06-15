@@ -11,6 +11,18 @@ const User = require("../models/User");
 const requireAuth = require("../middlewares/requireAuth");
 const logger = require("../utils/logger");
 const { generateOtp } = require("../utils/otp");
+const {
+  challengeExpiresAt,
+  createAuthenticationOptions,
+  createRegistrationOptions,
+  generateRecoveryCodes,
+  getActiveCredentials,
+  hashRecoveryCode,
+  isChallengeValid,
+  registrationInfoToCredential,
+  verifyAuthentication,
+  verifyRegistration,
+} = require("../services/webauthn");
 
 const router = express.Router();
 const handleValidation = require("../middlewares/handleValidation");
@@ -120,6 +132,8 @@ function getAuthUserResponse(user) {
     name: user.name || "",
     emailVerified: user.emailVerified,
     mfaEnabled: !!user.mfaEnabled,
+    webauthnEnabled: !!user.webauthnEnabled,
+    webauthnCredentialCount: getActiveCredentials(user).length,
   };
 }
 
@@ -609,6 +623,302 @@ router.post("/mfa/disable", requireAuth, async (req, res) => {
   }
 });
 
+// WEBAUTHN REGISTRATION OPTIONS
+router.post("/webauthn/register/options", requireAuth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({ message: "Korisnik nije pronađen." });
+    }
+
+    const options = await createRegistrationOptions(user);
+    user.webauthnRegistrationChallenge = options.challenge;
+    user.webauthnRegistrationChallengeExpiresAt = challengeExpiresAt();
+    await user.save();
+
+    return res.json({ options });
+  } catch (error) {
+    console.error(error);
+    return res
+      .status(500)
+      .json({ message: "Greška pri kreiranju passkey challenge-a." });
+  }
+});
+
+// WEBAUTHN REGISTRATION VERIFY
+router.post("/webauthn/register/verify", requireAuth, async (req, res) => {
+  try {
+    const { credential } = req.body ?? {};
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({ message: "Korisnik nije pronađen." });
+    }
+
+    if (!credential) {
+      return res.status(400).json({ message: "Credential response nedostaje." });
+    }
+
+    if (
+      !user.webauthnRegistrationChallenge ||
+      !isChallengeValid(user.webauthnRegistrationChallengeExpiresAt)
+    ) {
+      user.webauthnRegistrationChallenge = null;
+      user.webauthnRegistrationChallengeExpiresAt = null;
+      await user.save();
+
+      return res.status(401).json({ message: "Passkey challenge je istekao." });
+    }
+
+    const verification = await verifyRegistration({
+      user,
+      response: credential,
+      expectedChallenge: user.webauthnRegistrationChallenge,
+    });
+
+    if (!verification.verified || !verification.registrationInfo) {
+      return res.status(401).json({ message: "Passkey registracija nije uspela." });
+    }
+
+    const newCredential = registrationInfoToCredential(
+      verification.registrationInfo,
+    );
+    const existingCredential = await User.findOne({
+      "webauthnCredentials.credentialID": newCredential.credentialID,
+    });
+
+    if (existingCredential) {
+      return res
+        .status(409)
+        .json({ message: "Ovaj passkey je već registrovan." });
+    }
+
+    const recoveryCodes = generateRecoveryCodes();
+
+    user.webauthnCredentials.push(newCredential);
+    user.webauthnEnabled = true;
+    user.webauthnRecoveryCodeHashes = recoveryCodes.map(hashRecoveryCode);
+    user.webauthnRegistrationChallenge = null;
+    user.webauthnRegistrationChallengeExpiresAt = null;
+    await user.save();
+
+    return res.json({
+      message: "Passkey je uspešno aktiviran.",
+      recoveryCodes,
+      user: getAuthUserResponse(user),
+    });
+  } catch (error) {
+    console.error(error);
+    logger.error(error.stack || error.message || error);
+    return res
+      .status(400)
+      .json({
+        message: "Neuspešna passkey registracija.",
+        detail:
+          process.env.NODE_ENV === "production"
+            ? undefined
+            : error.message || String(error),
+      });
+  }
+});
+
+// WEBAUTHN LOGIN OPTIONS
+router.post("/webauthn/login/options", loginLimiter, async (req, res) => {
+  try {
+    const { email } = req.body ?? {};
+
+    if (!email) {
+      return res.status(400).json({ message: "Email je obavezan." });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const user = await User.findOne({ email: normalizedEmail });
+
+    if (!user || !user.webauthnEnabled || getActiveCredentials(user).length === 0) {
+      return res
+        .status(404)
+        .json({ message: "Passkey nije aktiviran za ovaj nalog." });
+    }
+
+    if (!user.emailVerified) {
+      return res.status(403).json({
+        message:
+          "Email nije verifikovan. Proveri inbox i potvrdi email pre logovanja.",
+      });
+    }
+
+    if (user.blockedUntil && user.blockedUntil > new Date()) {
+      return res.status(403).json({ message: "Nalog je privremeno blokiran." });
+    }
+
+    const options = await createAuthenticationOptions(user);
+    user.webauthnAuthenticationChallenge = options.challenge;
+    user.webauthnAuthenticationChallengeExpiresAt = challengeExpiresAt();
+    await user.save();
+
+    return res.json({ options, email: user.email });
+  } catch (error) {
+    console.error(error);
+    return res
+      .status(500)
+      .json({ message: "Greška pri kreiranju passkey login challenge-a." });
+  }
+});
+
+// WEBAUTHN LOGIN VERIFY
+router.post("/webauthn/login/verify", loginLimiter, async (req, res) => {
+  try {
+    const { email, credential } = req.body ?? {};
+
+    if (!email || !credential) {
+      return res
+        .status(400)
+        .json({ message: "Email i credential response su obavezni." });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const user = await User.findOne({ email: normalizedEmail });
+
+    if (!user || !user.webauthnEnabled) {
+      return res.status(404).json({ message: "Passkey nalog nije pronađen." });
+    }
+
+    if (!user.emailVerified) {
+      return res.status(403).json({
+        message:
+          "Email nije verifikovan. Proveri inbox i potvrdi email pre logovanja.",
+      });
+    }
+
+    if (user.blockedUntil && user.blockedUntil > new Date()) {
+      return res.status(403).json({ message: "Nalog je privremeno blokiran." });
+    }
+
+    if (
+      !user.webauthnAuthenticationChallenge ||
+      !isChallengeValid(user.webauthnAuthenticationChallengeExpiresAt)
+    ) {
+      user.webauthnAuthenticationChallenge = null;
+      user.webauthnAuthenticationChallengeExpiresAt = null;
+      await user.save();
+
+      return res.status(401).json({ message: "Passkey challenge je istekao." });
+    }
+
+    const storedCredential = getActiveCredentials(user).find(
+      (item) => item.credentialID === credential.id,
+    );
+
+    if (!storedCredential) {
+      return res.status(404).json({ message: "Credential nije pronađen." });
+    }
+
+    const verification = await verifyAuthentication({
+      response: credential,
+      credential: storedCredential,
+      expectedChallenge: user.webauthnAuthenticationChallenge,
+    });
+
+    if (!verification.verified) {
+      return res.status(401).json({ message: "Passkey prijava nije uspela." });
+    }
+
+    storedCredential.counter = verification.authenticationInfo.newCounter;
+    storedCredential.lastUsedAt = new Date();
+    user.webauthnAuthenticationChallenge = null;
+    user.webauthnAuthenticationChallengeExpiresAt = null;
+
+    if (user.mfaEnabled && user.mfaSecret) {
+      const challenge = generateMfaChallenge();
+      user.failedLoginCount = 0;
+      user.blockedUntil = null;
+      user.mfaLoginChallengeHash = challenge.hash;
+      user.mfaLoginChallengeExpiresAt = challenge.expiresAt;
+      user.mfaLoginAttempts = 0;
+      await user.save();
+
+      return res.json({
+        message: "MFA verification required",
+        requiresMfa: true,
+        email: user.email,
+        challengeToken: challenge.token,
+      });
+    }
+
+    const refreshToken = await issueLoginTokens(user, req, res);
+
+    return res.json({
+      message: "Uspešno logovanje preko passkey-ja.",
+      refreshToken,
+      user: getAuthUserResponse(user),
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(400).json({ message: "Neuspešna passkey prijava." });
+  }
+});
+
+// WEBAUTHN RECOVERY
+router.post("/webauthn/recovery", loginLimiter, async (req, res) => {
+  try {
+    const { email, recoveryCode } = req.body ?? {};
+
+    if (!email || !recoveryCode) {
+      return res
+        .status(400)
+        .json({ message: "Email i recovery kod su obavezni." });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const user = await User.findOne({ email: normalizedEmail });
+
+    if (!user || !user.webauthnEnabled) {
+      return res.status(404).json({ message: "Passkey nalog nije pronađen." });
+    }
+
+    const codeHash = hashRecoveryCode(recoveryCode);
+
+    if (!user.webauthnRecoveryCodeHashes.includes(codeHash)) {
+      return res.status(401).json({ message: "Recovery kod nije validan." });
+    }
+
+    user.webauthnEnabled = false;
+    user.webauthnCredentials = [];
+    user.webauthnRecoveryCodeHashes = [];
+    user.webauthnRegistrationChallenge = null;
+    user.webauthnRegistrationChallengeExpiresAt = null;
+    user.webauthnAuthenticationChallenge = null;
+    user.webauthnAuthenticationChallengeExpiresAt = null;
+
+    if (user.mfaEnabled && user.mfaSecret) {
+      const challenge = generateMfaChallenge();
+      user.mfaLoginChallengeHash = challenge.hash;
+      user.mfaLoginChallengeExpiresAt = challenge.expiresAt;
+      user.mfaLoginAttempts = 0;
+      await user.save();
+
+      return res.json({
+        message: "Passkey je deaktiviran. Potrebna je MFA potvrda.",
+        requiresMfa: true,
+        email: user.email,
+        challengeToken: challenge.token,
+      });
+    }
+
+    const refreshToken = await issueLoginTokens(user, req, res);
+
+    return res.json({
+      message: "Recovery uspešan. Passkey je deaktiviran.",
+      refreshToken,
+      user: getAuthUserResponse(user),
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Greška pri passkey recovery toku." });
+  }
+});
+
 // GOOGLE LOGIN
 router.get(
   "/google",
@@ -752,7 +1062,7 @@ router.post("/refresh", async (req, res) => {
 router.get("/me", requireAuth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select(
-      "email role emailVerified lastLoginAt loginHistory createdAt updatedAt name googleId mfaEnabled",
+      "email role emailVerified lastLoginAt loginHistory createdAt updatedAt name googleId mfaEnabled webauthnEnabled webauthnCredentials",
     );
 
     if (!user) {
@@ -770,6 +1080,8 @@ router.get("/me", requireAuth, async (req, res) => {
         name: user.name || "",
         hasGoogleAccount: !!user.googleId,
         mfaEnabled: !!user.mfaEnabled,
+        webauthnEnabled: !!user.webauthnEnabled,
+        webauthnCredentialCount: getActiveCredentials(user).length,
       },
     });
   } catch (e) {
@@ -837,6 +1149,8 @@ router.patch(
           loginHistory: user.loginHistory,
           hasGoogleAccount: !!user.googleId,
           mfaEnabled: !!user.mfaEnabled,
+          webauthnEnabled: !!user.webauthnEnabled,
+          webauthnCredentialCount: getActiveCredentials(user).length,
         },
       });
     } catch (e) {

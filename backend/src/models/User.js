@@ -9,6 +9,20 @@ const loginEntrySchema = new mongoose.Schema(
   { _id: false }
 );
 
+const webAuthnCredentialSchema = new mongoose.Schema(
+  {
+    credentialID: { type: String, required: true },
+    publicKey: { type: String, required: true },
+    counter: { type: Number, default: 0 },
+    deviceType: { type: String, default: null },
+    backedUp: { type: Boolean, default: false },
+    transports: { type: [String], default: [] },
+    createdAt: { type: Date, default: Date.now },
+    lastUsedAt: { type: Date, default: null }
+  },
+  { _id: false }
+);
+
 const userSchema = new mongoose.Schema(
   {
     name: {
@@ -126,6 +140,41 @@ const userSchema = new mongoose.Schema(
     emailVerifyTokenExpiresAt: {
       type: Date,
       default: null
+    },
+
+    webauthnEnabled: {
+      type: Boolean,
+      default: false
+    },
+
+    webauthnCredentials: {
+      type: [webAuthnCredentialSchema],
+      default: []
+    },
+
+    webauthnRegistrationChallenge: {
+      type: String,
+      default: null
+    },
+
+    webauthnRegistrationChallengeExpiresAt: {
+      type: Date,
+      default: null
+    },
+
+    webauthnAuthenticationChallenge: {
+      type: String,
+      default: null
+    },
+
+    webauthnAuthenticationChallengeExpiresAt: {
+      type: Date,
+      default: null
+    },
+
+    webauthnRecoveryCodeHashes: {
+      type: [String],
+      default: []
     }
   },
   { timestamps: true }

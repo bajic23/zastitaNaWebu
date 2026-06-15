@@ -2,6 +2,7 @@
 
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { loginWithPasskey, recoverPasskey } from "../../lib/webauthn";
 
 function LoginForm() {
   const router = useRouter();
@@ -12,6 +13,34 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [passkeyLoading, setPasskeyLoading] = useState(false);
+  const [recoveryCode, setRecoveryCode] = useState("");
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
+
+  function continueAfterAuth(data: {
+    refreshToken?: string;
+    requiresMfa?: boolean;
+    requiresOtp?: boolean;
+    email?: string;
+    challengeToken?: string;
+    user?: { role?: string };
+  }) {
+    if ((data?.requiresMfa || data?.requiresOtp) && data?.email) {
+      sessionStorage.setItem("mfa_email", data.email);
+      if (data?.challengeToken) {
+        sessionStorage.setItem("mfa_challenge_token", data.challengeToken);
+      }
+      router.replace("/verify-otp");
+      return;
+    }
+
+    if (data?.refreshToken) {
+      localStorage.setItem("refreshToken", data.refreshToken);
+    }
+
+    router.replace(data?.user?.role === "OPERATOR" ? "/admin" : next);
+    router.refresh();
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -36,25 +65,52 @@ function LoginForm() {
         return;
       }
 
-      if ((data?.requiresMfa || data?.requiresOtp) && data?.email) {
-        sessionStorage.setItem("mfa_email", data.email);
-        if (data?.challengeToken) {
-          sessionStorage.setItem("mfa_challenge_token", data.challengeToken);
-        }
-        router.replace("/verify-otp");
-        return;
-      }
-
-      if (data?.refreshToken) {
-        localStorage.setItem("refreshToken", data.refreshToken);
-      }
-
-      router.replace(next);
-      router.refresh();
+      continueAfterAuth(data);
     } catch {
       setMsg("Greška pri konekciji sa serverom.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function onPasskeyLogin() {
+    setMsg(null);
+
+    if (!email.trim()) {
+      setMsg("Unesi email, pa izaberi passkey prijavu.");
+      return;
+    }
+
+    setPasskeyLoading(true);
+
+    try {
+      const data = await loginWithPasskey(email);
+      continueAfterAuth(data);
+    } catch (error) {
+      setMsg(error instanceof Error ? error.message : "Passkey prijava nije uspela.");
+    } finally {
+      setPasskeyLoading(false);
+    }
+  }
+
+  async function onPasskeyRecovery(e: React.FormEvent) {
+    e.preventDefault();
+    setMsg(null);
+
+    if (!email.trim() || !recoveryCode.trim()) {
+      setMsg("Email i recovery kod su obavezni.");
+      return;
+    }
+
+    setRecoveryLoading(true);
+
+    try {
+      const data = await recoverPasskey(email, recoveryCode);
+      continueAfterAuth(data);
+    } catch (error) {
+      setMsg(error instanceof Error ? error.message : "Recovery nije uspeo.");
+    } finally {
+      setRecoveryLoading(false);
     }
   }
 
@@ -130,13 +186,47 @@ function LoginForm() {
 
               <button
                 type="button"
+                disabled={passkeyLoading}
+                onClick={onPasskeyLogin}
+                className="mt-6 w-full rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 font-semibold text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {passkeyLoading ? "Passkey provera..." : "Prijavi se passkey-jem"}
+              </button>
+
+              <button
+                type="button"
                 onClick={() => {
                   window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/api/auth/google`;
                 }}
-                className="mt-6 w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 font-semibold text-slate-100 transition hover:bg-slate-700"
+                className="mt-3 w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 font-semibold text-slate-100 transition hover:bg-slate-700"
               >
                 Prijava preko Google-a
               </button>
+
+              <form
+                onSubmit={onPasskeyRecovery}
+                className="mt-6 rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4"
+              >
+                <p className="text-sm font-semibold text-amber-200">
+                  Passkey recovery
+                </p>
+                <p className="mt-1 text-sm text-amber-100/90">
+                  Ako si izgubio uređaj, unesi recovery kod za deaktivaciju passkey-ja.
+                </p>
+                <input
+                  value={recoveryCode}
+                  onChange={(event) => setRecoveryCode(event.target.value)}
+                  placeholder="Recovery kod"
+                  className="mt-3 w-full rounded-xl border border-amber-500/30 bg-slate-950/70 px-4 py-3 text-white outline-none transition placeholder:text-slate-500 focus:border-amber-400"
+                />
+                <button
+                  type="submit"
+                  disabled={recoveryLoading}
+                  className="mt-3 w-full rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 font-semibold text-amber-100 transition hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {recoveryLoading ? "Recovery..." : "Iskoristi recovery kod"}
+                </button>
+              </form>
 
               <div className="my-6 flex items-center gap-3">
                 <div className="h-px flex-1 bg-slate-800" />

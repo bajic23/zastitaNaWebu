@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { registerPasskey } from "../../lib/webauthn";
 
 type UserRole = "PUTNIK" | "OPERATOR";
 
@@ -22,6 +23,8 @@ type MeUser = {
   loginHistory?: LoginHistoryItem[];
   hasGoogleAccount?: boolean;
   mfaEnabled?: boolean;
+  webauthnEnabled?: boolean;
+  webauthnCredentialCount?: number;
 };
 
 type MeResponse = {
@@ -68,6 +71,8 @@ export default function ProfilePage() {
   const [mfaCode, setMfaCode] = useState("");
   const [mfaLoading, setMfaLoading] = useState(false);
   const [backupCodes, setBackupCodes] = useState<string[]>([]);
+  const [passkeyLoading, setPasskeyLoading] = useState(false);
+  const [passkeyRecoveryCodes, setPasskeyRecoveryCodes] = useState<string[]>([]);
 
   async function loadMe() {
     const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/me`, {
@@ -334,6 +339,34 @@ export default function ProfilePage() {
     }
   }
 
+  async function handleRegisterPasskey() {
+    setActionMsg(null);
+    setActionError(null);
+    setPasskeyRecoveryCodes([]);
+    setPasskeyLoading(true);
+
+    try {
+      const data = await registerPasskey();
+
+      if (data.user) {
+        setMe(data.user as MeUser);
+      } else {
+        await loadMe();
+      }
+
+      setPasskeyRecoveryCodes(data.recoveryCodes || []);
+      setActionMsg(data.message || "Passkey je uspešno aktiviran.");
+    } catch (err) {
+      setActionError(
+        err instanceof Error
+          ? err.message
+          : "Došlo je do greške pri aktivaciji passkey-ja.",
+      );
+    } finally {
+      setPasskeyLoading(false);
+    }
+  }
+
   if (loading) {
     return (
       <main className="min-h-screen bg-slate-950 px-4 py-8 text-slate-100">
@@ -438,6 +471,15 @@ export default function ProfilePage() {
               }`}
             >
               MFA: {me.mfaEnabled ? "uključen" : "isključen"}
+            </span>
+            <span
+              className={`rounded-full border px-3 py-1 text-sm font-medium ${
+                me.webauthnEnabled
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+                  : "border-slate-600 bg-slate-800 text-slate-300"
+              }`}
+            >
+              Passkey: {me.webauthnEnabled ? "aktiviran" : "nije aktiviran"}
             </span>
           </div>
         </section>
@@ -546,6 +588,74 @@ export default function ProfilePage() {
             </div>
           </section>
         </div>
+
+        <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-lg">
+          <div className="mb-5">
+            <h2 className="text-xl font-bold text-white">Passkey autentifikacija</h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Aktiviraj prijavu pomoću telefona, biometrije ili sigurnosnog ključa.
+            </p>
+          </div>
+
+          <div
+            className={`grid gap-4 ${
+              me.webauthnEnabled ? "" : "md:grid-cols-[1fr_260px]"
+            }`}
+          >
+            <div
+              className={`rounded-2xl border p-4 ${
+                me.webauthnEnabled
+                  ? "border-emerald-500/20 bg-emerald-500/10"
+                  : "border-slate-800 bg-slate-950/50"
+              }`}
+            >
+              <p
+                className={`text-sm font-semibold ${
+                  me.webauthnEnabled ? "text-emerald-200" : "text-slate-200"
+                }`}
+              >
+                {me.webauthnEnabled
+                  ? "Passkey je aktiviran"
+                  : "Passkey nije aktiviran"}
+              </p>
+              <p className="mt-2 text-sm text-slate-300">
+                Registrovanih credentiala: {me.webauthnCredentialCount || 0}
+              </p>
+            </div>
+
+            {!me.webauthnEnabled ? (
+              <button
+                type="button"
+                disabled={passkeyLoading}
+                onClick={handleRegisterPasskey}
+                className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 font-semibold text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {passkeyLoading ? "Aktivacija..." : "Registruj passkey"}
+              </button>
+            ) : null}
+          </div>
+
+          {passkeyRecoveryCodes.length > 0 ? (
+            <div className="mt-5 rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4">
+              <p className="text-sm font-semibold text-amber-200">
+                Recovery kodovi
+              </p>
+              <p className="mt-2 text-sm text-amber-100/90">
+                Sačuvaj ove kodove sada. Prikazuju se samo jednom i u bazi se čuvaju hashovani.
+              </p>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2 md:grid-cols-4">
+                {passkeyRecoveryCodes.map((code) => (
+                  <code
+                    key={code}
+                    className="rounded-lg border border-amber-500/20 bg-slate-950/70 px-3 py-2 text-center text-sm text-amber-100"
+                  >
+                    {code}
+                  </code>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </section>
 
         <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/80 p-6 shadow-lg">
           <div className="mb-5">
